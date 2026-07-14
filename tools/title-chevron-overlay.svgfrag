@@ -1,0 +1,17 @@
+<defs>
+  <linearGradient id="title-chevron-top" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ff0000"/>
+    <stop offset="1" stop-color="#ee2020"/>
+  </linearGradient>
+  <linearGradient id="title-chevron-middle" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#d54a49"/>
+    <stop offset="1" stop-color="#a5a09f"/>
+  </linearGradient>
+  <linearGradient id="title-chevron-lower" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#b8acab"/>
+    <stop offset="1" stop-color="#90ccca"/>
+  </linearGradient>
+</defs>
+<path d="M151 30 L176 48 L181 48 L204 30 L204 36 L182 54 L175 54 L151 36 Z" transform="translate(3 -16)" fill="url(#title-chevron-top)"/>
+<path d="M151 30 L176 48 L181 48 L204 30 L204 36 L182 54 L175 54 L151 36 Z" transform="translate(3 -8)" fill="url(#title-chevron-middle)"/>
+<path d="M151 30 L176 48 L181 48 L204 30 L204 36 L182 54 L175 54 L151 36 Z" transform="translate(3 0)" fill="url(#title-chevron-lower)"/>

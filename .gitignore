@@ -1,0 +1,16 @@
+.godot/
+.venv/
+.agents/
+build/
+export/
+docs/
+original/
+assets/audio/candidates/
+tools/generate_bgm_candidates.py
+tools/generate_sfx_candidates.py
+tools/verify_bgm_candidates.py
+tools/verify_sfx_candidates.py
+*.tmp
+*.translation
+godot-validation.log
+assets/audio/candidates/sfx/**/*.wav.import
