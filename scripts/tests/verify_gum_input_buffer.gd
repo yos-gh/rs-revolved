@@ -17,9 +17,8 @@ func _run() -> void:
 	})
 
 	gum.energy = GumControllerUtil.MIN_ENERGY - 0.01
-	Input.action_press("gum")
+	gum.request_input()
 	gum.update_controller(1.0 / 120.0, Vector2.ZERO, 0.0, Vector2.RIGHT, [], [], Callable())
-	Input.action_release("gum")
 	assert(gum.state == 0)
 	assert(gum._input_buffer_timer > 0.0)
 
@@ -30,9 +29,8 @@ func _run() -> void:
 
 	gum.reset(Vector2.ZERO)
 	gum.energy = 0.0
-	Input.action_press("gum")
+	gum.request_input()
 	gum.update_controller(GumControllerUtil.INPUT_BUFFER_TIME + 0.01, Vector2.ZERO, 0.0, Vector2.RIGHT, [], [], Callable())
-	Input.action_release("gum")
 	gum.energy = 1.0
 	gum.update_controller(1.0 / 120.0, Vector2.ZERO, 0.0, Vector2.RIGHT, [], [], Callable())
 	assert(gum.state == 0)
