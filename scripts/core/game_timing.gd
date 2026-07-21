@@ -4,9 +4,9 @@ extends RefCounted
 const BULLET_TIME_START_OBJECTS := 75
 const BULLET_TIME_FULL_OBJECTS := 170
 const ENEMY_PRESSURE_WEIGHT := 2
-const MIN_TIME_SCALE := 0.58
-const TIME_SCALE_SLOWDOWN_RATE := 1.80
-const TIME_SCALE_RECOVERY_RATE := 0.28
+const MIN_TIME_SCALE := 0.50
+const TIME_SCALE_SLOWDOWN_RATE := 2.00
+const TIME_SCALE_RECOVERY_RATE := 0.33
 
 
 static func compute_object_pressure(bullet_count: int, enemy_count: int, boss_active: bool) -> int:

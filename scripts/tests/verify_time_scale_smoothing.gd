@@ -12,11 +12,13 @@ func _init() -> void:
 	var full_pressure := TimingUtil.BULLET_TIME_FULL_OBJECTS
 	var target_slow := TimingUtil.compute_time_scale(full_pressure)
 	assert(is_equal_approx(target_slow, TimingUtil.MIN_TIME_SCALE))
+	assert(is_equal_approx(TimingUtil.MIN_TIME_SCALE, 0.50))
 
 	var falling := TimingUtil.approach_time_scale(1.0, target_slow, 1.0 / 60.0)
 	assert(falling < 1.0)
 	assert(falling > target_slow)
-	assert(is_equal_approx(TimingUtil.TIME_SCALE_SLOWDOWN_RATE, 1.80))
+	assert(is_equal_approx(TimingUtil.TIME_SCALE_SLOWDOWN_RATE, 2.00))
+	assert(is_equal_approx(TimingUtil.TIME_SCALE_RECOVERY_RATE, 0.33))
 
 	var recovered := TimingUtil.approach_time_scale(target_slow, 1.0, 1.0 / 60.0)
 	assert(recovered > target_slow)

@@ -7,7 +7,8 @@ const ORIGINAL_SCREEN_W := 640.0
 const ORIGINAL_SCREEN_H := 480.0
 const SPAWN_AVOID_PLAYER_DISTANCE := 4.0
 const SPAWN_AVOID_PLAYER_DISTANCE_ZAKOM1 := 5.0
-const SPAWN_AVOID_PLAYER_PUSH := 2.5
+const SPAWN_AVOIDANCE_SAMPLE_COUNT := 64
+const SPAWN_AVOIDANCE_EPSILON := 0.001
 const SPAWN_RULES := {
 	"zakoM0": Vector2i(20, 20),
 	"zakoM1": Vector2i(40, 40),
@@ -165,9 +166,54 @@ func _avoid_player_spawn_pos(kind: String, pos: Vector2, player_pos: Vector2, fi
 	var from_player := pos - player_pos
 	if from_player.length() >= avoid_distance:
 		return pos
-	var direction := from_player.normalized() if from_player.length() > 0.001 else Vector2.RIGHT
-	var adjusted := pos + direction * SPAWN_AVOID_PLAYER_PUSH
-	return Vector2(
-		clampf(adjusted.x, -field_w * 0.5, field_w * 0.5),
-		clampf(adjusted.y, -field_h * 0.5, field_h * 0.5)
+	var target_distance := avoid_distance + SPAWN_AVOIDANCE_EPSILON
+	var direction := from_player.normalized()
+	if direction.length_squared() <= 0.0:
+		direction = (_farthest_field_corner(player_pos, field_w, field_h) - player_pos).normalized()
+	var projected := player_pos + direction * target_distance
+	if _is_inside_field(projected, field_w, field_h):
+		return projected
+
+	var nearest_valid := Vector2.ZERO
+	var nearest_distance_squared := INF
+	var found_valid := false
+	for sample in range(SPAWN_AVOIDANCE_SAMPLE_COUNT):
+		var angle := TAU * float(sample) / float(SPAWN_AVOIDANCE_SAMPLE_COUNT)
+		var candidate := player_pos + Vector2.from_angle(angle) * target_distance
+		if not _is_inside_field(candidate, field_w, field_h):
+			continue
+		var candidate_distance_squared := candidate.distance_squared_to(pos)
+		if not found_valid or candidate_distance_squared < nearest_distance_squared:
+			nearest_valid = candidate
+			nearest_distance_squared = candidate_distance_squared
+			found_valid = true
+	if found_valid:
+		return nearest_valid
+	return _farthest_field_corner(player_pos, field_w, field_h)
+
+
+func _is_inside_field(pos: Vector2, field_w: float, field_h: float) -> bool:
+	return (
+		pos.x >= -field_w * 0.5
+		and pos.x <= field_w * 0.5
+		and pos.y >= -field_h * 0.5
+		and pos.y <= field_h * 0.5
 	)
+
+
+func _farthest_field_corner(player_pos: Vector2, field_w: float, field_h: float) -> Vector2:
+	var half_size := Vector2(field_w, field_h) * 0.5
+	var corners := [
+		Vector2(-half_size.x, -half_size.y),
+		Vector2(half_size.x, -half_size.y),
+		Vector2(-half_size.x, half_size.y),
+		Vector2(half_size.x, half_size.y),
+	]
+	var farthest: Vector2 = corners[0]
+	var farthest_distance_squared := farthest.distance_squared_to(player_pos)
+	for corner in corners.slice(1):
+		var distance_squared: float = corner.distance_squared_to(player_pos)
+		if distance_squared > farthest_distance_squared:
+			farthest = corner
+			farthest_distance_squared = distance_squared
+	return farthest

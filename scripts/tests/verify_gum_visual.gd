@@ -84,7 +84,7 @@ func _init() -> void:
 	assert(low_trail_material.albedo_color.g > 0.20)
 	assert(low_trail_material.albedo_color.b > 0.14)
 
-	assert(is_equal_approx(GumControllerUtil.BULLET_RADIUS, 0.32))
+	assert(is_equal_approx(GumControllerUtil.BULLET_RADIUS, GumControllerUtil.ENEMY_RADIUS))
 	gum.state = 1
 	var orb := gum.get_child(0)
 	orb.position = Vector3.ZERO

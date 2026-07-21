@@ -9,7 +9,7 @@ const CollisionUtil := preload("res://scripts/core/collision.gd")
 
 const MIN_ENERGY := 0.18
 const ENEMY_RADIUS := 0.42
-const BULLET_RADIUS := 0.32
+const BULLET_RADIUS := ENEMY_RADIUS
 const ORBIT_TARGET_RADIUS := 1.125
 const ORBIT_SPEED := 13.0
 const ATTACK_SPEED := 15.0
