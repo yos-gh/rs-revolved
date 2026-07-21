@@ -1194,13 +1194,13 @@ func _setup_title() -> void:
 
 	title_hi_score = BitmapNumberUtil.new()
 	title_hi_score.name = "TitleHiScore"
-	title_hi_score.setup(SCORE_ATLAS, Vector2i(30, 16), 30, 26, 1.25)
-	title_hi_score.anchor_left = 0.625
-	title_hi_score.anchor_right = 0.625
-	title_hi_score.anchor_top = 0.925
-	title_hi_score.anchor_bottom = 0.925
-	title_hi_score.position = Vector2.ZERO
+	title_hi_score.setup(SCORE_ATLAS, Vector2i(30, 16), 30, 26, GameHudUtil.NUMBER_SCALE)
 	title_hi_score.set_number(int(game_state.hi_score), 9, 9)
+	title_hi_score.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	title_hi_score.offset_left = -GameHudUtil.HUD_MARGIN - title_hi_score.size.x
+	title_hi_score.offset_right = -GameHudUtil.HUD_MARGIN
+	title_hi_score.offset_top = -GameHudUtil.HUD_MARGIN - title_hi_score.size.y
+	title_hi_score.offset_bottom = -GameHudUtil.HUD_MARGIN
 	title_layer.add_child(title_hi_score)
 
 	var fullscreen_button := Button.new()

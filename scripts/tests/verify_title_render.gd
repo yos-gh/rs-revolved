@@ -21,7 +21,7 @@ func _init() -> void:
 	var image := viewport.get_texture().get_image()
 	assert(not image.is_empty())
 	assert(_region_has_bright_pixel(image, Rect2i(680, 360, 520, 260)))
-	assert(_region_has_bright_pixel(image, Rect2i(790, 650, 320, 50)))
+	assert(_region_has_bright_pixel(image, Rect2i(940, 660, 320, 50)))
 	var error := image.save_png("res://.godot/title-preview.png")
 	assert(error == OK)
 	viewport.queue_free()
