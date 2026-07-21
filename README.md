@@ -9,7 +9,7 @@ an orbital weapon, dense enemy waves, and bullet-time pressure effects.
 ## Download
 
 The latest Windows build is available from
-[GitHub Releases](https://github.com/ysykiskw-gh/rs-revolved/releases/latest).
+[GitHub Releases](https://github.com/yos-gh/rs-revolved/releases/latest).
 
 ## Controls
 
