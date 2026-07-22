@@ -301,6 +301,7 @@ var title_hi_score: BitmapNumber
 var title_mode_index := 0
 var title_void_revealed := false
 var title_void_noise_timer := 0.0
+var title_accept_blocked_by_fullscreen := false
 var arcade_clear_layer: CanvasLayer
 var game_over_layer: CanvasLayer
 var bullet_time_glitch: Control
@@ -1208,7 +1209,7 @@ func _setup_title() -> void:
 	fullscreen_button.icon = _fullscreen_icon_texture()
 	fullscreen_button.flat = true
 	fullscreen_button.focus_mode = Control.FOCUS_NONE
-	fullscreen_button.tooltip_text = "F11 Fullscreen"
+	fullscreen_button.tooltip_text = "Fullscreen"
 	fullscreen_button.anchor_left = 0.968
 	fullscreen_button.anchor_right = 0.968
 	fullscreen_button.anchor_top = 0.032
@@ -1217,6 +1218,7 @@ func _setup_title() -> void:
 	fullscreen_button.offset_right = 13.5
 	fullscreen_button.offset_top = -13.5
 	fullscreen_button.offset_bottom = 13.5
+	fullscreen_button.button_down.connect(_block_title_accept_for_fullscreen)
 	fullscreen_button.pressed.connect(_toggle_fullscreen)
 	title_layer.add_child(fullscreen_button)
 	_refresh_title_menu()
@@ -1241,6 +1243,10 @@ func _toggle_fullscreen() -> void:
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	_refresh_mouse_mode.call_deferred()
+
+
+func _block_title_accept_for_fullscreen() -> void:
+	title_accept_blocked_by_fullscreen = true
 
 
 func _fullscreen_icon_texture() -> Texture2D:
@@ -1395,6 +1401,10 @@ func _set_arcade_clear_visible(value: bool) -> void:
 
 func _update_title() -> void:
 	_update_title_void_noise(get_process_delta_time())
+	if title_accept_blocked_by_fullscreen:
+		if not Input.is_action_pressed("fire"):
+			title_accept_blocked_by_fullscreen = false
+		return
 	if Input.is_action_just_pressed("move_up"):
 		_move_title_selection(-1)
 	elif Input.is_action_just_pressed("move_down"):

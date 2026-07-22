@@ -46,9 +46,17 @@ func _init() -> void:
 	var fullscreen_button := main.title_layer.find_child("FullscreenButton", true, false) as Button
 	assert(fullscreen_button != null)
 	assert(fullscreen_button.icon is ImageTexture)
+	assert(fullscreen_button.tooltip_text == "Fullscreen")
 	assert(InputMap.has_action("toggle_fullscreen"))
 	assert(InputMap.action_get_events("toggle_fullscreen").size() > 0)
 	assert(main._debug_shortcuts_enabled() == OS.is_debug_build())
+	main._block_title_accept_for_fullscreen()
+	Input.action_press("fire")
+	main._update_title()
+	assert(not main.game_state.game_started)
+	Input.action_release("fire")
+	main._update_title()
+	assert(not main.game_state.game_started)
 
 	main._select_title_mode(3)
 	main._move_title_selection(1)
