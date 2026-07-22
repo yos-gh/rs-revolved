@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16191b">
+  <meta name="description" content="Play Rev Sweeper Revolved in your browser.">
+  <title>Rev Sweeper Revolved</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #16191b;
+      --surface: #22272a;
+      --line: #3e4a4f;
+      --text: #eef5f4;
+      --muted: #a8b7b6;
+      --cyan: #75e1de;
+      --red: #f15068;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--background);
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--background);
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--cyan);
+    }
+
+    a:hover {
+      color: #b8fffc;
+    }
+
+    .topbar {
+      min-height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 10px max(18px, calc((100vw - 1280px) / 2));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .topbar h1 {
+      margin: 0;
+      color: var(--text);
+      font-size: 1rem;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .topbar nav {
+      display: flex;
+      gap: 18px;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .game-wrap {
+      width: min(calc(100% - 32px), 1280px);
+      margin: 0 auto;
+      padding: 12px 0 18px;
+    }
+
+    .game-frame {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 0;
+      background: #000;
+    }
+
+    main {
+      border-top: 1px solid var(--line);
+    }
+
+    .content {
+      width: min(calc(100% - 36px), 980px);
+      margin: 0 auto;
+      padding: 38px 0 56px;
+    }
+
+    .intro {
+      max-width: 720px;
+      margin: 0 0 34px;
+      color: var(--muted);
+      font-size: 0.96rem;
+    }
+
+    .sections {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0 42px;
+    }
+
+    section {
+      padding: 22px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    section h2 {
+      margin: 0 0 12px;
+      color: var(--cyan);
+      font-size: 0.88rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    section h3 {
+      margin: 18px 0 8px;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    section p,
+    section ul {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    section ul {
+      padding-left: 1.2rem;
+    }
+
+    section li + li {
+      margin-top: 4px;
+    }
+
+    code {
+      color: var(--text);
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    footer {
+      padding: 20px 18px 30px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: center;
+    }
+
+    @media (max-width: 720px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .topbar nav {
+        gap: 14px;
+      }
+
+      .game-wrap {
+        padding-top: 8px;
+      }
+
+      .sections {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Rev Sweeper Revolved</h1>
+    <nav aria-label="Project links">
+      <a href="https://github.com/yos-gh/rs-revolved/releases/latest">Windows download</a>
+      <a href="https://github.com/yos-gh/rs-revolved">Source</a>
+    </nav>
+  </header>
+
+  <div class="game-wrap">
+    <iframe
+      class="game-frame"
+      src="game/index.html"
+      title="Rev Sweeper Revolved game"
+      allow="autoplay; fullscreen; gamepad"
+      allowfullscreen
+    ></iframe>
+  </div>
+
+  <main>
+    <div class="content">
+      <p class="intro">
+        A fixed-screen, all-range shooter built around precise aiming, an
+        orbital weapon, dense enemy waves, and bullet-time pressure effects.
+      </p>
+
+      <div class="sections">
+        <section>
+          <h2>Keyboard and mouse</h2>
+          <ul>
+            <li>Move: <code>WASD</code> or arrow keys</li>
+            <li>Aim: mouse cursor</li>
+            <li>Fire: hold the left mouse button</li>
+            <li>Orbital Weapon: right mouse button</li>
+            <li>Confirm: left mouse button or <code>Enter</code></li>
+            <li>Back/quit: <code>Esc</code></li>
+            <li>Fullscreen: <code>F11</code></li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Gamepad</h2>
+          <ul>
+            <li>Move: left stick or D-pad</li>
+            <li>Aim direction: right stick</li>
+            <li>Fire: <code>LB</code> or <code>LT</code></li>
+            <li>Orbital Weapon: <code>RB</code> or <code>RT</code></li>
+            <li>Confirm: <code>LB</code>, <code>LT</code>, A/Cross, or Start</li>
+            <li>Back/quit: B/Circle or Back/Select</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Orbital Weapon</h2>
+          <p>
+            Press once to deploy it around the ship, again to launch it, and
+            once more to recall it. With a mouse it travels toward the cursor.
+            With a gamepad, steer its direction with the right stick. It also
+            returns automatically when its energy runs out.
+          </p>
+        </section>
+
+        <section>
+          <h2>Game modes</h2>
+          <h3>Arcade</h3>
+          <p>
+            Fight through increasingly intense enemy waves and boss battles in
+            a finite run. Defeat the final boss to clear the game.
+          </p>
+          <h3>Endless</h3>
+          <p>
+            Survive an unending stream of enemies at the selected difficulty.
+            The run continues until all lives are lost.
+          </p>
+        </section>
+
+        <section>
+          <h2>Scoring</h2>
+          <p>
+            Destroying enemies increases both your score and Tension. Higher
+            Tension raises the value of subsequent kills, but gradually falls
+            over time. Score milestones award extra lives.
+          </p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    Rev Sweeper Revolved is available under the project licenses published in
+    the GitHub repository.
+  </footer>
+</body>
+</html>

@@ -1,0 +1,77 @@
+name: Deploy Web build to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7-stable
+  GODOT_TEMPLATE_VERSION: 4.7.stable
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Godot and export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GODOT_ARCHIVE="Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          TEMPLATE_ARCHIVE="Godot_v${GODOT_VERSION}_export_templates.tpz"
+          RELEASE_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          GODOT_DIR="${RUNNER_TEMP}/godot"
+          TEMPLATE_SOURCE="${RUNNER_TEMP}/godot-templates"
+          TEMPLATE_DIR="${HOME}/.local/share/godot/export_templates/${GODOT_TEMPLATE_VERSION}"
+
+          mkdir -p "${GODOT_DIR}" "${TEMPLATE_SOURCE}" "${TEMPLATE_DIR}"
+          curl --fail --location --retry 3 --output "${RUNNER_TEMP}/${GODOT_ARCHIVE}" "${RELEASE_URL}/${GODOT_ARCHIVE}"
+          curl --fail --location --retry 3 --output "${RUNNER_TEMP}/${TEMPLATE_ARCHIVE}" "${RELEASE_URL}/${TEMPLATE_ARCHIVE}"
+          unzip -q "${RUNNER_TEMP}/${GODOT_ARCHIVE}" -d "${GODOT_DIR}"
+          unzip -q "${RUNNER_TEMP}/${TEMPLATE_ARCHIVE}" -d "${TEMPLATE_SOURCE}"
+          cp -R "${TEMPLATE_SOURCE}/templates/." "${TEMPLATE_DIR}/"
+          chmod +x "${GODOT_DIR}/Godot_v${GODOT_VERSION}_linux.x86_64"
+          echo "${GODOT_DIR}" >> "${GITHUB_PATH}"
+
+      - name: Export Web build
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT_BIN="Godot_v${GODOT_VERSION}_linux.x86_64"
+          mkdir -p export/web/game
+          "${GODOT_BIN}" --headless --path . --export-release Web export/web/game/index.html
+          cp web/index.html export/web/index.html
+          touch export/web/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: export/web
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

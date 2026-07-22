@@ -11,6 +11,9 @@ an orbital weapon, dense enemy waves, and bullet-time pressure effects.
 The latest Windows build is available from
 [GitHub Releases](https://github.com/yos-gh/rs-revolved/releases/latest).
 
+The Web version can be played on
+[GitHub Pages](https://yos-gh.github.io/rs-revolved/).
+
 ## Controls
 
 The most recently used input device selects the control mode automatically.
