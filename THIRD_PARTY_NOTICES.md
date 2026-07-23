@@ -29,3 +29,15 @@ This project is built with Godot Engine.
 
 Godot Engine itself is not vendored in this source repository. Exported
 runtime builds include Godot Engine components under Godot's MIT License.
+
+## Sentry SDK for Godot
+
+This project vendors selected Windows, Linux, and Web components from Sentry
+SDK for Godot 2.1.0 for error and crash reporting.
+
+- Project: https://github.com/getsentry/sentry-godot
+- Release: https://github.com/getsentry/sentry-godot/releases/tag/2.1.0
+- License: MIT License
+
+The complete SDK license text is preserved in
+`addons/sentry/LICENSE.md`.
