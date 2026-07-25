@@ -55,11 +55,21 @@ jobs:
         run: |
           set -euo pipefail
           GODOT_BIN="Godot_v${GODOT_VERSION}_linux.x86_64"
-          mkdir -p export/web/game
-          "${GODOT_BIN}" --headless --path . --export-release Web export/web/game/index.html
-          rm -f export/web/game/sentry-bundle.js export/web/game/sentry-bundle.js.map
+          BUILD_ID="${GITHUB_SHA:0:12}"
+          GAME_DIR="export/web/game/${BUILD_ID}"
+          mkdir -p "${GAME_DIR}"
+          "${GODOT_BIN}" --headless --path . --export-release Web "${GAME_DIR}/index.html"
+          rm -f "${GAME_DIR}/sentry-bundle.js" "${GAME_DIR}/sentry-bundle.js.map"
           cp web/index.html export/web/index.html
+          sed -i "s#game/index.html#game/${BUILD_ID}/index.html#" export/web/index.html
           cp web/audio-check.html export/web/audio-check.html
+          mkdir -p export/web/game
+          cat > export/web/game/index.html <<EOF
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>Rev Sweeper Revolved</title>
+          <script>location.replace("./${BUILD_ID}/index.html" + location.search + location.hash)</script>
+          EOF
           touch export/web/.nojekyll
 
       - name: Configure GitHub Pages
