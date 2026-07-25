@@ -313,6 +313,8 @@ var app_has_focus := true
 var web_right_mouse_down := false
 var web_pointer_callback
 var web_context_menu_callback
+var web_audio_debug_elapsed := 0.0
+var web_audio_debug_reported := false
 
 var hud: GameHud
 
@@ -390,6 +392,7 @@ func _process(delta: float) -> void:
 		_update_debug_collisions()
 		return
 	bgm.sync(game_state.game_mode, game_state.endless_difficulty, game_state.music_stage)
+	_update_web_audio_diagnostics(delta)
 	_update_game_timing(delta)
 	_update_bullet_time_glitch(delta)
 	var sim_delta := delta * game_time_scale
@@ -1106,6 +1109,25 @@ func _print_web_audio_diagnostics() -> void:
 			AudioServer.get_mix_rate(),
 			AudioServer.get_output_latency(),
 			AudioServer.bus_count,
+		]
+	)
+
+
+func _update_web_audio_diagnostics(delta: float) -> void:
+	if not OS.has_feature("web") or web_audio_debug_reported or bgm.current_track <= 0:
+		return
+	web_audio_debug_elapsed += delta
+	if web_audio_debug_elapsed < 2.0:
+		return
+	web_audio_debug_reported = true
+	var master_index := AudioServer.get_bus_index(&"Master")
+	var time_warp_index := AudioServer.get_bus_index(TimeWarpAudioUtil.BUS_NAME)
+	print(
+		"Web audio diagnostics: position=%.3f playing=%s master_peak=%.2f time_warp_peak=%.2f" % [
+			bgm.player.get_playback_position(),
+			bgm.player.playing,
+			AudioServer.get_bus_peak_volume_left_db(master_index, 0),
+			AudioServer.get_bus_peak_volume_left_db(time_warp_index, 0),
 		]
 	)
 
