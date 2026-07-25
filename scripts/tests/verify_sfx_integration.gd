@@ -47,24 +47,16 @@ func _run() -> void:
 	assert(is_equal_approx(compressor.threshold, SfxPlayerUtil.DESTRUCTION_COMPRESSOR_THRESHOLD_DB))
 	assert(is_equal_approx(compressor.ratio, SfxPlayerUtil.DESTRUCTION_COMPRESSOR_RATIO))
 	assert(is_equal_approx(limiter.ceiling_db, SfxPlayerUtil.DESTRUCTION_LIMITER_CEILING_DB))
-	sfx._web_bomb_s_window_started_msec = Time.get_ticks_msec()
-	sfx._web_bomb_s_starts_in_window = 0
-	var burst_base_db := -6.0
-	assert(is_equal_approx(sfx._prepare_web_bomb_s_volume(burst_base_db), burst_base_db))
-	assert(is_equal_approx(
-		sfx._prepare_web_bomb_s_volume(burst_base_db),
-		burst_base_db - SfxPlayerUtil.WEB_BOMB_S_BURST_ATTENUATION_DB
-	))
-	assert(is_equal_approx(
-		sfx._prepare_web_bomb_s_volume(burst_base_db),
-		burst_base_db - SfxPlayerUtil.WEB_BOMB_S_BURST_ATTENUATION_DB * 2.0
-	))
-	assert(is_nan(sfx._prepare_web_bomb_s_volume(burst_base_db)))
 	assert(not sfx.has_event("unknown"))
 	for event in ["shot", "bomb_s", "bomb_m", "die", "extend", "gum_o", "gum_c"]:
-		var stream_path: String = sfx.player_for(event).stream.resource_path
+		var event_stream := sfx.player_for(event).stream
+		var stream_path: String = event_stream.resource_path
 		assert(stream_path.contains("/original_mastered/"))
 		assert(stream_path.ends_with("/%s.wav" % event))
+		if event == "bomb_s":
+			var bomb_s_stream := event_stream as AudioStreamWAV
+			assert(bomb_s_stream.format == AudioStreamWAV.FORMAT_16_BITS)
+			assert(absi(bomb_s_stream.data.decode_s16(bomb_s_stream.data.size() - 2)) <= 32)
 
 	var played: Array[String] = []
 	sfx.event_played.connect(func(event: String) -> void: played.append(event))
