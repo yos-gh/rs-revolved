@@ -11,7 +11,7 @@ func _init() -> void:
 
 
 func _run() -> void:
-	assert(int(ProjectSettings.get_setting("audio/driver/output_latency.web")) == 80)
+	assert(int(ProjectSettings.get_setting("audio/driver/output_latency.web")) == 100)
 	var sfx := SfxPlayerUtil.new()
 	sfx.setup()
 	root.add_child(sfx)
