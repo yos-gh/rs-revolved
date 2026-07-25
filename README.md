@@ -14,10 +14,6 @@ The latest Windows build is available from
 The Web version can be played on
 [GitHub Pages](https://yos-gh.github.io/rs-revolved/).
 
-The vendored Sentry integration is currently disabled in public builds while a
-Web audio regression in the GDExtension-enabled export is being investigated.
-The Windows build does not include Sentry and remains a single executable.
-
 ## Controls
 
 The most recently used input device selects the control mode automatically.
