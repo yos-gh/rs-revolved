@@ -61,15 +61,19 @@ var _gum_tweens: Dictionary = {}
 
 func setup() -> void:
 	name = "SfxPlayer"
-	TimeWarpAudioUtil.ensure_bus()
-	_ensure_sfx_mix_bus()
-	_ensure_destruction_bus()
+	var web_runtime := _is_web_runtime()
+	if not web_runtime:
+		TimeWarpAudioUtil.ensure_bus()
+		_ensure_sfx_mix_bus()
+		_ensure_destruction_bus()
 	for event in STREAMS:
 		var player := AudioStreamPlayer.new()
 		player.name = "Sfx%s" % String(event).to_pascal_case()
 		player.stream = STREAMS[event]
 		player.max_polyphony = MAX_POLYPHONY[event]
-		if event in DESTRUCTION_EVENTS:
+		if web_runtime:
+			player.bus = &"Master"
+		elif event in DESTRUCTION_EVENTS:
 			player.bus = DESTRUCTION_BUS_NAME
 		else:
 			player.bus = SFX_MIX_BUS_NAME
@@ -215,3 +219,7 @@ func has_event(event: String) -> bool:
 
 func player_for(event: String) -> AudioStreamPlayer:
 	return _players.get(event) as AudioStreamPlayer
+
+
+static func _is_web_runtime() -> bool:
+	return OS.get_name() == "Web" or OS.has_feature("web")

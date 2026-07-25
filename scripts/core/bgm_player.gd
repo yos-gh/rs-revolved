@@ -22,7 +22,7 @@ func setup() -> void:
 	player = AudioStreamPlayer.new()
 	player.name = "OriginalBgm"
 	player.volume_db = PLAYBACK_VOLUME_DB
-	player.bus = TimeWarpAudioUtil.BUS_NAME
+	player.bus = &"Master" if _is_web_runtime() else TimeWarpAudioUtil.BUS_NAME
 	add_child(player)
 	for track in TRACKS:
 		var stream := TRACKS[track].duplicate() as AudioStreamOggVorbis
@@ -57,3 +57,7 @@ static func track_for_state(game_mode: String, endless_difficulty: int, music_st
 	if game_mode == "endless":
 		return clampi(endless_difficulty, 1, 4)
 	return clampi(music_stage, 1, 3)
+
+
+static func _is_web_runtime() -> bool:
+	return OS.get_name() == "Web" or OS.has_feature("web")
