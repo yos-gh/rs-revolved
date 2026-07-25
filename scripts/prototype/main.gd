@@ -329,6 +329,7 @@ func _ready() -> void:
 	_setup_time_warp_audio()
 	_setup_sfx()
 	_setup_bgm()
+	_print_web_audio_diagnostics()
 	_setup_bullets()
 	_setup_enemy_visual_batches()
 	_setup_player()
@@ -1094,6 +1095,19 @@ func _setup_bgm() -> void:
 	bgm = BgmPlayerUtil.new()
 	bgm.setup()
 	add_child(bgm)
+
+
+func _print_web_audio_diagnostics() -> void:
+	if not OS.has_feature("web"):
+		return
+	print(
+		"Web audio diagnostics: driver=%s mix_rate=%.0f latency=%.4f buses=%d" % [
+			AudioServer.get_driver_name(),
+			AudioServer.get_mix_rate(),
+			AudioServer.get_output_latency(),
+			AudioServer.bus_count,
+		]
+	)
 
 
 func _play_gum_open() -> void:
