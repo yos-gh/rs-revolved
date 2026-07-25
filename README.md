@@ -14,10 +14,9 @@ The latest Windows build is available from
 The Web version can be played on
 [GitHub Pages](https://yos-gh.github.io/rs-revolved/).
 
-The Web build uses Sentry for error diagnostics. Default personal information
-collection is disabled; reports may include engine diagnostics and the Godot
-application log. The Windows build does not include Sentry and remains a single
-executable.
+The vendored Sentry integration is currently disabled in public builds while a
+Web audio regression in the GDExtension-enabled export is being investigated.
+The Windows build does not include Sentry and remains a single executable.
 
 ## Controls
 

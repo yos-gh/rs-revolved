@@ -57,6 +57,7 @@ jobs:
           GODOT_BIN="Godot_v${GODOT_VERSION}_linux.x86_64"
           mkdir -p export/web/game
           "${GODOT_BIN}" --headless --path . --export-release Web export/web/game/index.html
+          rm -f export/web/game/sentry-bundle.js export/web/game/sentry-bundle.js.map
           cp web/index.html export/web/index.html
           touch export/web/.nojekyll
 

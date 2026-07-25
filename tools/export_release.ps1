@@ -54,6 +54,8 @@ $script:GodotExe = Resolve-GodotConsole $GodotConsole
 if (-not $SkipWeb) {
     Remove-Item -Recurse -Force $WebOut -ErrorAction SilentlyContinue
     Invoke-Export "Web" (Join-Path $WebOut "index.html")
+    Remove-Item (Join-Path $WebOut "sentry-bundle.js") -Force -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $WebOut "sentry-bundle.js.map") -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $SkipWindows) {
