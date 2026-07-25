@@ -25,7 +25,7 @@ func setup() -> void:
 	player.bus = TimeWarpAudioUtil.BUS_NAME
 	add_child(player)
 	for track in TRACKS:
-		var stream := TRACKS[track] as AudioStreamOggVorbis
+		var stream := TRACKS[track].duplicate() as AudioStreamOggVorbis
 		stream.loop = true
 		_loop_streams[track] = stream
 

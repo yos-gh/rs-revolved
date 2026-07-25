@@ -315,6 +315,9 @@ var web_pointer_callback
 var web_context_menu_callback
 var web_audio_debug_elapsed := 0.0
 var web_audio_debug_reported := false
+var web_audio_debug_max_master_peak := -200.0
+var web_audio_debug_max_time_warp_peak := -200.0
+var web_audio_probe_player: AudioStreamPlayer
 
 var hud: GameHud
 
@@ -1116,20 +1119,53 @@ func _print_web_audio_diagnostics() -> void:
 func _update_web_audio_diagnostics(delta: float) -> void:
 	if not OS.has_feature("web") or web_audio_debug_reported or bgm.current_track <= 0:
 		return
+	if web_audio_probe_player == null:
+		_start_web_audio_pcm_probe()
 	web_audio_debug_elapsed += delta
+	var master_index := AudioServer.get_bus_index(&"Master")
+	var time_warp_index := AudioServer.get_bus_index(TimeWarpAudioUtil.BUS_NAME)
+	web_audio_debug_max_master_peak = maxf(
+		web_audio_debug_max_master_peak,
+		AudioServer.get_bus_peak_volume_left_db(master_index, 0)
+	)
+	web_audio_debug_max_time_warp_peak = maxf(
+		web_audio_debug_max_time_warp_peak,
+		AudioServer.get_bus_peak_volume_left_db(time_warp_index, 0)
+	)
 	if web_audio_debug_elapsed < 2.0:
 		return
 	web_audio_debug_reported = true
-	var master_index := AudioServer.get_bus_index(&"Master")
-	var time_warp_index := AudioServer.get_bus_index(TimeWarpAudioUtil.BUS_NAME)
 	print(
-		"Web audio diagnostics: position=%.3f playing=%s master_peak=%.2f time_warp_peak=%.2f" % [
+		"Web audio diagnostics: position=%.3f playing=%s max_master_peak=%.2f max_time_warp_peak=%.2f" % [
 			bgm.player.get_playback_position(),
 			bgm.player.playing,
-			AudioServer.get_bus_peak_volume_left_db(master_index, 0),
-			AudioServer.get_bus_peak_volume_left_db(time_warp_index, 0),
+			web_audio_debug_max_master_peak,
+			web_audio_debug_max_time_warp_peak,
 		]
 	)
+
+
+func _start_web_audio_pcm_probe() -> void:
+	const SAMPLE_RATE := 44100
+	const FRAME_COUNT := 44100
+	var data := PackedByteArray()
+	data.resize(FRAME_COUNT * 2)
+	for frame in range(FRAME_COUNT):
+		var envelope := 1.0 - float(frame) / float(FRAME_COUNT)
+		var sample := sin(TAU * 440.0 * float(frame) / float(SAMPLE_RATE)) * envelope * 0.16
+		data.encode_s16(frame * 2, int(sample * 32767.0))
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = SAMPLE_RATE
+	stream.stereo = false
+	stream.data = data
+	web_audio_probe_player = AudioStreamPlayer.new()
+	web_audio_probe_player.name = "WebAudioPcmProbe"
+	web_audio_probe_player.stream = stream
+	web_audio_probe_player.bus = &"Master"
+	add_child(web_audio_probe_player)
+	web_audio_probe_player.play()
+	print("Web audio diagnostics: PCM probe playing=%s bus=%s" % [web_audio_probe_player.playing, web_audio_probe_player.bus])
 
 
 func _play_gum_open() -> void:
