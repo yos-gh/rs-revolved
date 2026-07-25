@@ -21,6 +21,8 @@ func setup() -> void:
 	TimeWarpAudioUtil.ensure_bus()
 	player = AudioStreamPlayer.new()
 	player.name = "OriginalBgm"
+	if OS.has_feature("web"):
+		player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 	player.volume_db = PLAYBACK_VOLUME_DB
 	player.bus = TimeWarpAudioUtil.BUS_NAME
 	add_child(player)
@@ -44,8 +46,6 @@ func play_track(track: int) -> void:
 	current_track = track
 	player.stream = _loop_streams[track]
 	player.play()
-	if OS.has_feature("web"):
-		print("Web audio diagnostics: BGM track=%d playing=%s bus=%s" % [track, player.playing, player.bus])
 
 
 func stop() -> void:

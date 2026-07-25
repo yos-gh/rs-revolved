@@ -67,6 +67,8 @@ func setup() -> void:
 	for event in STREAMS:
 		var player := AudioStreamPlayer.new()
 		player.name = "Sfx%s" % String(event).to_pascal_case()
+		if OS.has_feature("web"):
+			player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 		player.stream = STREAMS[event]
 		player.max_polyphony = MAX_POLYPHONY[event]
 		if event in DESTRUCTION_EVENTS:
