@@ -1107,11 +1107,12 @@ func _print_web_audio_diagnostics() -> void:
 	if not OS.has_feature("web"):
 		return
 	print(
-		"Web audio diagnostics: driver=%s mix_rate=%.0f latency=%.4f buses=%d" % [
+		"Web audio diagnostics: driver=%s mix_rate=%.0f latency=%.4f buses=%d playback_type=%d" % [
 			AudioServer.get_driver_name(),
 			AudioServer.get_mix_rate(),
 			AudioServer.get_output_latency(),
 			AudioServer.bus_count,
+			ProjectSettings.get_setting("audio/general/default_playback_type.web", -1),
 		]
 	)
 
