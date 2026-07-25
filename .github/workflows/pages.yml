@@ -62,7 +62,6 @@ jobs:
           rm -f "${GAME_DIR}/sentry-bundle.js" "${GAME_DIR}/sentry-bundle.js.map"
           cp web/index.html export/web/index.html
           sed -i "s#game/index.html#game/${BUILD_ID}/index.html#" export/web/index.html
-          cp web/audio-check.html export/web/audio-check.html
           mkdir -p export/web/game
           cat > export/web/game/index.html <<EOF
           <!doctype html>
