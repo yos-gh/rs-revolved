@@ -49,6 +49,10 @@ const DESTRUCTION_EVENTS := ["bomb_s", "bomb_m", "die"]
 const DESTRUCTION_COMPRESSOR_THRESHOLD_DB := -6.0
 const DESTRUCTION_COMPRESSOR_RATIO := 6.0
 const DESTRUCTION_LIMITER_CEILING_DB := -1.0
+const WEB_BOMB_S_MAX_POLYPHONY := 4
+const WEB_BOMB_S_BURST_WINDOW_MSEC := 45
+const WEB_BOMB_S_MAX_STARTS_PER_WINDOW := 3
+const WEB_BOMB_S_BURST_ATTENUATION_DB := 3.0
 const GUM_EVENTS := ["gum_o", "gum_c"]
 const GUM_FADE_OUT_TIME := 0.055
 const GUM_FADE_IN_TIME := 0.035
@@ -57,6 +61,8 @@ const GUM_MIN_REVERSE_SEGMENT := 0.30
 
 var _players: Dictionary = {}
 var _gum_tweens: Dictionary = {}
+var _web_bomb_s_window_started_msec := -WEB_BOMB_S_BURST_WINDOW_MSEC
+var _web_bomb_s_starts_in_window := 0
 
 
 func setup() -> void:
@@ -71,6 +77,8 @@ func setup() -> void:
 			player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 		player.stream = STREAMS[event]
 		player.max_polyphony = MAX_POLYPHONY[event]
+		if OS.has_feature("web") and event == "bomb_s":
+			player.max_polyphony = WEB_BOMB_S_MAX_POLYPHONY
 		if event in DESTRUCTION_EVENTS:
 			player.bus = DESTRUCTION_BUS_NAME
 		else:
@@ -152,12 +160,33 @@ func play(event: String, volume_range := Vector2i(-1, -1)) -> void:
 	var selected_range: Vector2i = ORIGINAL_VOLUME_RANGES[event] if volume_range.x < 0 else volume_range
 	var original_volume := randi_range(selected_range.x, selected_range.y)
 	var target_volume_db := linear_to_db(float(original_volume) / ORIGINAL_VOLUME_MAX)
+	if OS.has_feature("web") and event == "bomb_s":
+		var web_burst_volume := _prepare_web_bomb_s_volume(target_volume_db)
+		if is_nan(web_burst_volume):
+			event_played.emit(event)
+			return
+		target_volume_db = web_burst_volume
 	if event in GUM_EVENTS:
 		_play_gum_transition(event, target_volume_db)
 	else:
 		player.volume_db = target_volume_db
 		player.play()
 	event_played.emit(event)
+
+
+func _prepare_web_bomb_s_volume(target_volume_db: float) -> float:
+	var now_msec := Time.get_ticks_msec()
+	if now_msec - _web_bomb_s_window_started_msec >= WEB_BOMB_S_BURST_WINDOW_MSEC:
+		_web_bomb_s_window_started_msec = now_msec
+		_web_bomb_s_starts_in_window = 0
+	if _web_bomb_s_starts_in_window >= WEB_BOMB_S_MAX_STARTS_PER_WINDOW:
+		return NAN
+	var attenuated_volume_db := (
+		target_volume_db
+		- WEB_BOMB_S_BURST_ATTENUATION_DB * float(_web_bomb_s_starts_in_window)
+	)
+	_web_bomb_s_starts_in_window += 1
+	return attenuated_volume_db
 
 
 func _play_gum_transition(event: String, target_volume_db: float) -> void:
