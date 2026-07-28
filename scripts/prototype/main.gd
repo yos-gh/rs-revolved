@@ -1005,7 +1005,8 @@ func _update_aim_reticle(delta: float) -> void:
 func _setup_bullets() -> void:
 	bullet_manager = BulletManagerUtil.new()
 	bullet_manager.setup(palette)
-	bullet_manager.hit_effect_requested.connect(_spawn_hit_effect)
+	bullet_manager.hit_effect_requested.connect(_spawn_player_shot_hit_effect)
+	bullet_manager.bullet_break_effect_requested.connect(_spawn_bullet_break_effect)
 	add_child(bullet_manager)
 
 
@@ -1019,6 +1020,7 @@ func _setup_gum() -> void:
 	gum_controller = GumControllerUtil.new()
 	gum_controller.setup(palette)
 	gum_controller.hit_effect_requested.connect(_spawn_hit_effect)
+	gum_controller.bullet_break_effect_requested.connect(_spawn_bullet_break_effect)
 	gum_controller.opened.connect(_play_gum_open)
 	gum_controller.launched.connect(_play_gum_close)
 	add_child(gum_controller)
@@ -3436,12 +3438,51 @@ func _spawn_enemy_destroy_effect(pos: Vector2, color: Color, radius: float, acce
 	fade.tween_callback(burst.queue_free)
 
 
-func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.RIGHT) -> void:
+func _spawn_player_shot_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.RIGHT) -> Node3D:
+	return _spawn_hit_effect(pos, color, impact_direction, 2.0, 0.24)
+
+
+func _spawn_bullet_break_effect(pos: Vector2, color: Color, drift_direction := Vector2.ZERO) -> Node3D:
+	var burst := Node3D.new()
+	burst.name = "BulletBreakEffect"
+	burst.set_meta("effect_type", "bullet_break")
+	burst.position = _to_world(pos, 0.44)
+	var plate := MeshInstance3D.new()
+	plate.name = "BulletBreakPlate"
+	plate.set_meta("break_piece", "plate")
+	var mesh := BoxMesh.new()
+	var plate_size := randf_range(0.18, 0.28)
+	mesh.size = Vector3(plate_size, 0.008, plate_size)
+	plate.mesh = mesh
+	var material := _transparent_material(Color(color.r, color.g, color.b, 0.46), 0.82)
+	plate.material_override = material
+	plate.rotation = Vector3(randf_range(-0.55, 0.55), randf() * TAU, randf_range(-0.55, 0.55))
+	burst.add_child(plate)
+	add_child(burst)
+	var direction := drift_direction.normalized()
+	if direction.is_zero_approx():
+		direction = Vector2.from_angle(randf() * TAU)
+	direction = direction.rotated(randf_range(-0.38, 0.38))
+	var target_distance := randf_range(0.46, 0.78)
+	plate.set_meta("target_distance", target_distance)
+	var duration := randf_range(0.22, 0.34)
+	var tween := create_tween()
+	tween.parallel().tween_property(plate, "position", _to_world(direction * target_distance, randf_range(-0.08, 0.14)), duration)
+	tween.parallel().tween_property(plate, "rotation", plate.rotation + Vector3(randf_range(-1.8, 1.8), randf_range(1.4, 3.0), randf_range(-1.8, 1.8)), duration)
+	tween.parallel().tween_property(plate, "scale", Vector3.ONE * randf_range(0.22, 0.46), duration)
+	tween.parallel().tween_property(material, "albedo_color", Color(color.r, color.g, color.b, 0.0), duration)
+	tween.tween_callback(burst.queue_free)
+	return burst
+
+
+func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.RIGHT, travel_scale := 1.0, yellow_mix := 0.0) -> Node3D:
 	var flash := Node3D.new()
 	flash.name = "HitEffect"
-	var tail_mat := _transparent_material(Color(color.r, color.g, color.b, 0.32), 0.48)
+	flash.set_meta("travel_scale", travel_scale)
+	var spark_color := color.lerp(Color(1.0, 0.86, 0.22), yellow_mix)
+	var tail_mat := _transparent_material(Color(spark_color.r, spark_color.g, spark_color.b, 0.32), 0.48)
 	tail_mat.emission_enabled = false
-	var tip_color := color.lerp(Color(1.0, 0.92, 0.42), 0.35).lightened(0.16)
+	var tip_color := spark_color.lerp(Color(1.0, 0.92, 0.42), 0.35).lightened(0.16)
 	var tip_mat := _transparent_material(Color(tip_color, 0.86), 2.42)
 	flash.position = _to_world(pos, 0.42)
 	var incoming := impact_direction.normalized()
@@ -3486,11 +3527,12 @@ func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.R
 		flash.add_child(tip)
 	add_child(flash)
 	var tween := create_tween()
-	tween.parallel().tween_property(flash, "scale", Vector3.ONE * randf_range(1.35, 2.05), randf_range(0.14, 0.22))
+	tween.parallel().tween_property(flash, "scale", Vector3.ONE * randf_range(1.35, 2.05) * travel_scale, randf_range(0.14, 0.22))
 	tween.parallel().tween_property(flash, "rotation", flash.rotation + Vector3(0.0, randf_range(-0.18, 0.18), 0.0), 0.20)
-	tween.parallel().tween_property(tail_mat, "albedo_color", Color(color.r, color.g, color.b, 0.0), randf_range(0.14, 0.22))
-	tween.parallel().tween_property(tip_mat, "albedo_color", Color(color.r, color.g, color.b, 0.0), randf_range(0.14, 0.22))
+	tween.parallel().tween_property(tail_mat, "albedo_color", Color(spark_color.r, spark_color.g, spark_color.b, 0.0), randf_range(0.14, 0.22))
+	tween.parallel().tween_property(tip_mat, "albedo_color", Color(spark_color.r, spark_color.g, spark_color.b, 0.0), randf_range(0.14, 0.22))
 	tween.tween_callback(flash.queue_free)
+	return flash
 
 
 func _spawn_boss_core_unlock_effect(pos: Vector2) -> void:

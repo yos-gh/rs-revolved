@@ -52,6 +52,33 @@ func _init() -> void:
 	assert(hit_tail_count == hit_tip_count)
 	assert(rearward_tail_count >= 2)
 
+	var shot_hit := main._spawn_player_shot_hit_effect(Vector2.ONE, Color(0.80, 0.95, 1.0), Vector2.RIGHT)
+	assert(shot_hit != null)
+	assert(is_equal_approx(float(shot_hit.get_meta("travel_scale", 0.0)), 2.0))
+	var shot_tail := shot_hit.find_child("HitEffectTail", true, false) as MeshInstance3D
+	assert(shot_tail != null)
+	var shot_tail_material := shot_tail.material_override as StandardMaterial3D
+	assert(shot_tail_material != null)
+	assert(shot_tail_material.albedo_color.r > 0.84)
+	assert(shot_tail_material.albedo_color.b < 0.90)
+
+	var bullet_break := main._spawn_bullet_break_effect(Vector2(-1.0, 0.5), Color(0.97, 0.12, 0.40), Vector2.LEFT)
+	assert(bullet_break != null)
+	assert(String(bullet_break.get_meta("effect_type", "")) == "bullet_break")
+	assert(bullet_break.get_child_count() == 1)
+	var break_plate := bullet_break.get_child(0) as MeshInstance3D
+	assert(break_plate != null)
+	assert(String(break_plate.get_meta("break_piece", "")) == "plate")
+	assert(float(break_plate.get_meta("target_distance", 0.0)) >= 0.46)
+	var break_mesh := break_plate.mesh as BoxMesh
+	assert(break_mesh != null)
+	assert(is_equal_approx(break_mesh.size.x, break_mesh.size.z))
+	assert(break_mesh.size.y <= 0.009)
+	var break_material := break_plate.material_override as StandardMaterial3D
+	assert(break_material != null)
+	assert(break_material.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA)
+	assert(break_material.albedo_color.a >= 0.45)
+
 	main._spawn_player_backfire(Vector2.ZERO, 0.0)
 	var backfire := main.find_child("PlayerBackfire", true, false) as Node3D
 	assert(backfire != null)

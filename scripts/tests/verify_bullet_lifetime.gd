@@ -6,6 +6,7 @@ const BulletManagerUtil := preload("res://scripts/game/bullet_manager.gd")
 func _init() -> void:
 	var manager := BulletManagerUtil.new()
 	root.add_child(manager)
+	manager.setup({"shot": Color(0.80, 0.95, 1.0)})
 	var player_axis: Array[Vector2] = [Vector2(100.0, 100.0), Vector2(100.0, 100.0)]
 
 	manager.bullets.append(_test_bullet(manager, Vector2.ZERO, BulletManagerUtil.DEFAULT_HOSTILE_BULLET_LIFETIME))
@@ -19,6 +20,23 @@ func _init() -> void:
 	manager.bullets.append(_test_bullet(manager, Vector2.ZERO, 0.5))
 	manager.update_bullets(0.6, 16.0, 9.0, 2.0, false, player_axis, [])
 	assert(manager.count() == 0)
+
+	var break_state := {"count": 0}
+	manager.bullet_break_effect_requested.connect(func(_pos: Vector2, _color: Color, _direction: Vector2) -> void:
+		break_state.count += 1
+	)
+	manager.spawn_hostile_bullet(
+		Vector2.ZERO,
+		0.0,
+		BulletManagerUtil.BULLET0_SPEED,
+		true,
+		"line",
+		0.05,
+		BulletManagerUtil.ZAKO_LINE_BULLET_LENGTH
+	)
+	manager.update_bullets(0.06, 16.0, 9.0, 2.0, false, player_axis, [])
+	assert(manager.count() == 0)
+	assert(break_state.count == 1)
 
 	manager.queue_free()
 	await process_frame

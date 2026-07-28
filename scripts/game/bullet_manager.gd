@@ -2,6 +2,7 @@ class_name BulletManager
 extends Node3D
 
 signal hit_effect_requested(pos: Vector2, color: Color, impact_direction: Vector2)
+signal bullet_break_effect_requested(pos: Vector2, color: Color, drift_direction: Vector2)
 
 const CollisionUtil := preload("res://scripts/core/collision.gd")
 const PlayerUtil := preload("res://scripts/game/player.gd")
@@ -356,6 +357,7 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 		"shot_blockable": is_boss_b2,
 		"tail_light": _uses_light_bullet0_tail(),
 		"spin_node": spin_node,
+		"break_color": _break_color_for_display_key(display_key),
 	})
 	if batched_visual:
 		_batch_dirty = true
@@ -387,6 +389,7 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 	var player_hit := false
 	var player_pos := (player_axis[0] + player_axis[1]) * 0.5
 	for bullet in bullets:
+		bullet["expired_by_lifetime"] = false
 		if bullet.get("behavior", "") == "boss_b2":
 			var desired_angle := (player_pos - (bullet.pos as Vector2)).angle()
 			bullet.angle = _turn_toward_angle(bullet.angle, desired_angle, BOSS_B2_HOMING_RATE * delta)
@@ -394,7 +397,9 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 		bullet.age = bullet.get("age", 0.0) + delta
 		_update_boss_b1_growth(bullet)
 		bullet.pos += bullet.vel * delta
+		var life_before: float = bullet.life
 		bullet.life -= delta
+		bullet["expired_by_lifetime"] = life_before > 0.0 and bullet.life <= 0.0
 		var node := bullet.node as Node3D
 		if node != null:
 			node.position = _to_world(bullet.pos, 0.28)
@@ -420,6 +425,9 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 		if bullet.life > 0.0 and _is_in_field_margin(bullet.pos, field_w, field_h, despawn_margin):
 			live.append(bullet)
 		else:
+			if bullet.get("visual_key", "") == "bullet3" and bullet.get("expired_by_lifetime", false):
+				var drift_direction := -(bullet.vel as Vector2).normalized()
+				bullet_break_effect_requested.emit(bullet.pos, bullet.get("break_color", BULLET0_INNER_COLOR), drift_direction)
 			var node := bullet.node as Node3D
 			if node != null:
 				node.queue_free()
@@ -444,6 +452,20 @@ func _resolve_player_shot_hits_on_destructible_bullets() -> void:
 				target.life = 0.0
 				hit_effect_requested.emit(target.pos, _palette.shot, (shot.vel as Vector2).normalized())
 				break
+
+
+func _break_color_for_display_key(display_key: String) -> Color:
+	match display_key:
+		"bullet1":
+			return Color(1.0, 0.78, 0.18)
+		"bullet2":
+			return Color(1.0, 0.58, 0.12)
+		"bullet3":
+			return BULLET0_INNER_COLOR
+		"boss_b2":
+			return Color(0.34, 0.82, 1.0)
+		_:
+			return BULLET0_INNER_COLOR
 
 
 func clear() -> void:

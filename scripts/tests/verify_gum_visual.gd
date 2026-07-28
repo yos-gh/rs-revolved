@@ -100,6 +100,18 @@ func _init() -> void:
 			"radius": 0.09,
 		}
 	assert(gum._catches_bullet(0, bullet, shape))
+	var break_state := {"count": 0, "color": Color.TRANSPARENT}
+	gum.bullet_break_effect_requested.connect(func(_pos: Vector2, color: Color, _direction: Vector2) -> void:
+		break_state.count += 1
+		break_state.color = color
+	)
+	bullet["pos"] = Vector2(0.40, 0.0)
+	bullet["vel"] = Vector2.RIGHT
+	bullet["break_color"] = Color(1.0, 0.78, 0.18)
+	gum.update_controller(0.016, Vector2.ZERO, 0.0, Vector2.RIGHT, [bullet], [], shape)
+	assert(is_zero_approx(float(bullet.life)))
+	assert(break_state.count == 1)
+	assert((break_state.color as Color).is_equal_approx(Color(1.0, 0.78, 0.18)))
 
 	var emitted_directions: Array[Vector2] = []
 	gum.hit_effect_requested.connect(func(_pos: Vector2, _color: Color, direction: Vector2) -> void:

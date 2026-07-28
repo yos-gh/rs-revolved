@@ -2,6 +2,7 @@ class_name GumController
 extends Node3D
 
 signal hit_effect_requested(pos: Vector2, color: Color, impact_direction: Vector2)
+signal bullet_break_effect_requested(pos: Vector2, color: Color, drift_direction: Vector2)
 signal opened
 signal launched
 
@@ -130,9 +131,19 @@ func update_controller(delta: float, player_pos: Vector2, player_angle: float, a
 			continue
 		if not bullet.gum_blockable:
 			continue
+		if bullet.life <= 0.0:
+			continue
 		for i in range(_orbs.size()):
 			if _catches_bullet(i, bullet, bullet_shape):
+				var velocity: Vector2 = bullet.get("vel", Vector2.ZERO)
+				var drift_direction := -velocity.normalized()
+				bullet_break_effect_requested.emit(
+					bullet.pos,
+					bullet.get("break_color", Color(0.97, 0.12, 0.40)),
+					drift_direction
+				)
 				bullet.life = 0.0
+				break
 
 
 func state_name() -> String:
