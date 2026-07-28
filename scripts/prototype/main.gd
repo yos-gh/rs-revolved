@@ -3439,7 +3439,7 @@ func _spawn_enemy_destroy_effect(pos: Vector2, color: Color, radius: float, acce
 
 
 func _spawn_player_shot_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.RIGHT) -> Node3D:
-	return _spawn_hit_effect(pos, color, impact_direction, 2.0, 0.24)
+	return _spawn_hit_effect(pos, color, impact_direction, 1.5, 0.38)
 
 
 func _spawn_bullet_break_effect(pos: Vector2, color: Color, drift_direction := Vector2.ZERO) -> Node3D:

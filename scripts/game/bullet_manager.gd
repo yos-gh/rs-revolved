@@ -418,9 +418,14 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 				bullet.life = 0.0
 				player_hit = true
 		else:
+			bullet.erase("hit_effect_pos")
 			if _hit_enemies_by_bullet(bullet, enemies, 1):
 				bullet.life = 0.0
-				hit_effect_requested.emit(bullet.pos, _palette.shot, (bullet.vel as Vector2).normalized())
+				hit_effect_requested.emit(
+					bullet.get("hit_effect_pos", bullet.pos),
+					_palette.shot,
+					(bullet.vel as Vector2).normalized()
+				)
 
 		if bullet.life > 0.0 and _is_in_field_margin(bullet.pos, field_w, field_h, despawn_margin):
 			live.append(bullet)
@@ -544,12 +549,30 @@ func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], dama
 		if not CollisionUtil.shape_overlaps_circle(bullet_shape, enemy.pos, enemy.radius):
 			continue
 		if enemy.get("blocks_shots", false):
+			if not bullet.has("hit_effect_pos"):
+				bullet["hit_effect_pos"] = _shape_circle_contact_point(bullet_shape, enemy.pos, enemy.radius, bullet.vel)
 			hit = true
 			continue
 		if enemy.get("damageable", true):
+			if not bullet.has("hit_effect_pos"):
+				bullet["hit_effect_pos"] = _shape_circle_contact_point(bullet_shape, enemy.pos, enemy.radius, bullet.vel)
 			enemy.life -= damage
 			hit = true
 	return hit
+
+
+func _shape_circle_contact_point(shape: Dictionary, circle_pos: Vector2, circle_radius: float, travel_velocity: Vector2) -> Vector2:
+	var shape_center: Vector2
+	if shape.type == "capsule":
+		shape_center = CollisionUtil.closest_point_on_segment(circle_pos, shape.a, shape.b)
+	else:
+		shape_center = shape.pos
+	var toward_circle := circle_pos - shape_center
+	if toward_circle.is_zero_approx():
+		toward_circle = travel_velocity.normalized()
+	if toward_circle.is_zero_approx():
+		toward_circle = Vector2.RIGHT
+	return circle_pos - toward_circle.normalized() * circle_radius
 
 
 func _hits_player(bullet: Dictionary, player_axis: Array[Vector2]) -> bool:

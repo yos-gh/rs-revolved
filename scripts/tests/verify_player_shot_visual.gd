@@ -36,6 +36,17 @@ func _init() -> void:
 	assert(face_color.a < 0.30)
 	assert(float(face_material.get_shader_parameter("emission_strength")) >= 1.10)
 
+	var shot_shape := {
+		"type": "capsule",
+		"a": Vector2(-BulletManagerUtil.PLAYER_SHOT_LENGTH * 0.5, 0.0),
+		"b": Vector2(BulletManagerUtil.PLAYER_SHOT_LENGTH * 0.5, 0.0),
+		"radius": BulletManagerUtil.PLAYER_SHOT_RADIUS,
+	}
+	var enemy_pos := Vector2(0.60, 0.0)
+	var enemy_radius := 0.30
+	var contact := manager._shape_circle_contact_point(shot_shape, enemy_pos, enemy_radius, Vector2.RIGHT)
+	assert(contact.is_equal_approx(Vector2(0.30, 0.0)))
+
 	manager.queue_free()
 	await process_frame
 	await process_frame

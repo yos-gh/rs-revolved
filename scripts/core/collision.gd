@@ -3,12 +3,16 @@ extends RefCounted
 
 
 static func point_segment_distance(point: Vector2, a: Vector2, b: Vector2) -> float:
+	return point.distance_to(closest_point_on_segment(point, a, b))
+
+
+static func closest_point_on_segment(point: Vector2, a: Vector2, b: Vector2) -> Vector2:
 	var ab := b - a
 	var length_sq := ab.length_squared()
 	if length_sq <= 0.000001:
-		return point.distance_to(a)
+		return a
 	var t := clampf((point - a).dot(ab) / length_sq, 0.0, 1.0)
-	return point.distance_to(a + ab * t)
+	return a + ab * t
 
 
 static func circle_overlaps_circle(a_pos: Vector2, a_radius: float, b_pos: Vector2, b_radius: float) -> bool:

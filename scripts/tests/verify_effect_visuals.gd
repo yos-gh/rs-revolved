@@ -54,13 +54,13 @@ func _init() -> void:
 
 	var shot_hit := main._spawn_player_shot_hit_effect(Vector2.ONE, Color(0.80, 0.95, 1.0), Vector2.RIGHT)
 	assert(shot_hit != null)
-	assert(is_equal_approx(float(shot_hit.get_meta("travel_scale", 0.0)), 2.0))
+	assert(is_equal_approx(float(shot_hit.get_meta("travel_scale", 0.0)), 1.5))
 	var shot_tail := shot_hit.find_child("HitEffectTail", true, false) as MeshInstance3D
 	assert(shot_tail != null)
 	var shot_tail_material := shot_tail.material_override as StandardMaterial3D
 	assert(shot_tail_material != null)
 	assert(shot_tail_material.albedo_color.r > 0.84)
-	assert(shot_tail_material.albedo_color.b < 0.90)
+	assert(shot_tail_material.albedo_color.b < 0.75)
 
 	var bullet_break := main._spawn_bullet_break_effect(Vector2(-1.0, 0.5), Color(0.97, 0.12, 0.40), Vector2.LEFT)
 	assert(bullet_break != null)
