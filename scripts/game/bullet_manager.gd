@@ -546,33 +546,19 @@ func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], dama
 	var hit := false
 	var bullet_shape := shape_for(bullet)
 	for enemy in enemies:
-		if not CollisionUtil.shape_overlaps_circle(bullet_shape, enemy.pos, enemy.radius):
+		if not CollisionUtil.shape_overlaps_enemy(bullet_shape, enemy):
 			continue
 		if enemy.get("blocks_shots", false):
 			if not bullet.has("hit_effect_pos"):
-				bullet["hit_effect_pos"] = _shape_circle_contact_point(bullet_shape, enemy.pos, enemy.radius, bullet.vel)
+				bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
 			hit = true
 			continue
 		if enemy.get("damageable", true):
 			if not bullet.has("hit_effect_pos"):
-				bullet["hit_effect_pos"] = _shape_circle_contact_point(bullet_shape, enemy.pos, enemy.radius, bullet.vel)
+				bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
 			enemy.life -= damage
 			hit = true
 	return hit
-
-
-func _shape_circle_contact_point(shape: Dictionary, circle_pos: Vector2, circle_radius: float, travel_velocity: Vector2) -> Vector2:
-	var shape_center: Vector2
-	if shape.type == "capsule":
-		shape_center = CollisionUtil.closest_point_on_segment(circle_pos, shape.a, shape.b)
-	else:
-		shape_center = shape.pos
-	var toward_circle := circle_pos - shape_center
-	if toward_circle.is_zero_approx():
-		toward_circle = travel_velocity.normalized()
-	if toward_circle.is_zero_approx():
-		toward_circle = Vector2.RIGHT
-	return circle_pos - toward_circle.normalized() * circle_radius
 
 
 func _hits_player(bullet: Dictionary, player_axis: Array[Vector2]) -> bool:

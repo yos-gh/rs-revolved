@@ -1798,7 +1798,7 @@ func _update_enemies(delta: float) -> void:
 			not enemy.get("spawn_collision_locked", false)
 			and enemy.kind != "boss_core"
 			and _player_can_be_hit()
-			and _is_player_hit_by_enemy(enemy.pos, enemy.radius)
+			and _is_player_hit_by_enemy(enemy)
 		):
 			if _enemy_is_destroyed_on_player_contact(enemy):
 				enemy.life = 0
@@ -2024,7 +2024,11 @@ func _update_debug_collisions() -> void:
 			enemy_color = Color(0.25, 0.90, 1.0, 0.95) if enemy.get("damageable", true) else Color(0.45, 0.58, 0.66, 0.80)
 		elif enemy.kind.begins_with("boss_turret"):
 			enemy_color = Color(1.0, 0.70, 0.18, 0.95) if enemy.get("damageable", true) else Color(0.65, 0.48, 0.28, 0.80)
-		debug_root.show_circle(enemy.pos, enemy.radius, enemy_color)
+		for enemy_shape in CollisionUtil.shapes_for_enemy(enemy):
+			if enemy_shape.type == "capsule":
+				debug_root.show_capsule(enemy_shape.a, enemy_shape.b, enemy_shape.radius, enemy_color)
+			else:
+				debug_root.show_circle(enemy_shape.pos, enemy_shape.radius, enemy_color)
 	bullet_manager.show_debug_shapes(debug_root, Color(1.0, 0.15, 0.15, 0.80), Color(0.70, 0.95, 1.0, 0.80))
 	for orb_pos in gum_controller.debug_orb_positions():
 		debug_root.show_circle(orb_pos, GumControllerUtil.BULLET_RADIUS, Color(1.0, 0.35, 0.9, 0.85))
@@ -2947,6 +2951,7 @@ func _spawn_boss_turret(kind: String) -> void:
 	var connection_line := _boss_connection_ribbon_runtime_model(boss.center, pos, enemies.size())
 	add_child(connection_line)
 	var enemy := EnemyUtil.create_boss_turret(kind, node, pos, color, BOSS_TURRET_LIFE, _boss_turret_radius(kind), offset)
+	enemy.collision_parts = _boss_turret_collision_parts(kind)
 	enemy.connection_line = connection_line
 	enemy.body_visual = node.find_child("boss-t-body-visual", true, false)
 	enemy.body_faces = _boss_t_body_faces(enemy.body_visual as Node3D)
@@ -2963,6 +2968,32 @@ func _spawn_boss_turret(kind: String) -> void:
 
 func _boss_turret_radius(kind: String) -> float:
 	return BOSS_TURRET_RADII.get(kind, BOSS_TURRET_RADIUS)
+
+
+func _boss_turret_collision_parts(kind: String) -> Array[Dictionary]:
+	if kind == "boss_turret_t1":
+		return [
+			{"type": "capsule", "a": Vector2(-1.04, 0.0), "b": Vector2(1.04, 0.0), "radius": 0.22},
+			{"type": "capsule", "a": Vector2(-0.84, -0.64), "b": Vector2(0.84, -0.64), "radius": 0.12},
+			{"type": "capsule", "a": Vector2(-0.84, 0.64), "b": Vector2(0.84, 0.64), "radius": 0.12},
+		]
+	if kind == "boss_turret_t2":
+		return [
+			{"type": "capsule", "a": Vector2(-0.72, 0.0), "b": Vector2(0.72, 0.0), "radius": 0.22},
+			{"type": "capsule", "a": Vector2(0.0, -1.02), "b": Vector2(0.0, 1.02), "radius": 0.19},
+			{"type": "circle", "pos": Vector2(0.0, -1.24), "radius": 0.20},
+			{"type": "circle", "pos": Vector2(0.0, 1.24), "radius": 0.20},
+		]
+	var triangle_radius := 1.04
+	var vertices: Array[Vector2] = []
+	for index in range(3):
+		vertices.append(Vector2.from_angle(TAU * float(index) / 3.0) * triangle_radius)
+	return [
+		{"type": "capsule", "a": vertices[0], "b": vertices[1], "radius": 0.15},
+		{"type": "capsule", "a": vertices[1], "b": vertices[2], "radius": 0.15},
+		{"type": "capsule", "a": vertices[2], "b": vertices[0], "radius": 0.15},
+		{"type": "circle", "pos": Vector2.ZERO, "radius": 0.24},
+	]
 
 
 func _boss_t_body_faces(root: Node3D) -> Array[Node]:
@@ -4218,8 +4249,14 @@ func _is_player_hit_by_circle(pos: Vector2, radius: float) -> bool:
 	return CollisionUtil.circle_overlaps_capsule(pos, radius, axis[0], axis[1], PlayerUtil.HIT_RADIUS)
 
 
-func _is_player_hit_by_enemy(pos: Vector2, radius: float) -> bool:
-	return _is_player_hit_by_circle(pos, radius)
+func _is_player_hit_by_enemy(enemy: Dictionary) -> bool:
+	var axis := _player_hit_axis()
+	return CollisionUtil.shape_overlaps_enemy({
+		"type": "capsule",
+		"a": axis[0],
+		"b": axis[1],
+		"radius": PlayerUtil.HIT_RADIUS,
+	}, enemy)
 
 
 func _player_hit_axis() -> Array[Vector2]:

@@ -236,7 +236,7 @@ func _hit_enemies_at(enemies: Array[Dictionary], pos: Vector2, radius: float, da
 	for enemy in enemies:
 		if not enemy.get("gum_vulnerable", true):
 			continue
-		if enemy.get("damageable", true) and CollisionUtil.circle_overlaps_circle(pos, radius, enemy.pos, enemy.radius):
+		if enemy.get("damageable", true) and CollisionUtil.circle_overlaps_enemy(pos, radius, enemy):
 			enemy.life -= damage
 			hit = true
 	if hit:

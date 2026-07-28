@@ -1,6 +1,7 @@
 extends SceneTree
 
 const BulletManagerUtil := preload("res://scripts/game/bullet_manager.gd")
+const CollisionUtil := preload("res://scripts/core/collision.gd")
 
 
 func _init() -> void:
@@ -44,8 +45,24 @@ func _init() -> void:
 	}
 	var enemy_pos := Vector2(0.60, 0.0)
 	var enemy_radius := 0.30
-	var contact := manager._shape_circle_contact_point(shot_shape, enemy_pos, enemy_radius, Vector2.RIGHT)
+	var fallback_enemy := {"pos": enemy_pos, "radius": enemy_radius}
+	var contact := CollisionUtil.contact_point_on_enemy(shot_shape, fallback_enemy, Vector2.RIGHT)
 	assert(contact.is_equal_approx(Vector2(0.30, 0.0)))
+
+	var shaped_enemy := {
+		"pos": Vector2(0.8, 0.0),
+		"radius": 1.0,
+		"t_body_angle": 0.0,
+		"collision_parts": [
+			{"type": "capsule", "a": Vector2(-0.4, 0.0), "b": Vector2(0.4, 0.0), "radius": 0.1},
+		],
+	}
+	assert(CollisionUtil.shape_overlaps_enemy(shot_shape, shaped_enemy))
+	var shaped_contact := CollisionUtil.contact_point_on_enemy(shot_shape, shaped_enemy, Vector2.RIGHT)
+	assert(shaped_contact.is_equal_approx(Vector2(0.3, 0.0)))
+	shaped_enemy.t_body_angle = PI * 0.5
+	assert(not CollisionUtil.shape_overlaps_enemy(shot_shape, shaped_enemy))
+	assert(CollisionUtil.shape_overlaps_enemy(shot_shape, fallback_enemy))
 
 	manager.queue_free()
 	await process_frame
