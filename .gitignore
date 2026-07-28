@@ -14,3 +14,4 @@ tools/verify_sfx_candidates.py
 *.translation
 godot-validation.log
 assets/audio/candidates/sfx/**/*.wav.import
+addons/sentry/bin/windows/x86_64/~libsentry.windows.debug.x86_64.dll
