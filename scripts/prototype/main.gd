@@ -2078,7 +2078,7 @@ func _update_bullet_time_glitch(delta: float) -> void:
 	if active:
 		intensity = TimingUtil.bullet_time_intensity(game_time_scale)
 	var screen_pos := camera.unproject_position(_to_world(player.pos, 0.32)) if active else Vector2.ZERO
-	bullet_time_glitch.update_effect(delta, screen_pos, intensity)
+	bullet_time_glitch.update_effect(delta, screen_pos, intensity, bgm.beat_position(), bgm.beat_seconds())
 	time_warp_audio.update_effect(bullet_time_glitch.intensity)
 
 
