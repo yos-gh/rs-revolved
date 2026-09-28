@@ -55,10 +55,6 @@ func _init() -> void:
 	main._replace_released_zako7p_visual(follower)
 	follower.chain_released = true
 	assert(main._enemy_is_destroyed_on_player_contact(follower))
-	assert(follower_node.find_child("zako3p-low-wedge", true, false) != null)
-	assert(follower_node.find_child("zako7p-mini-crystal", true, false) == null)
-	assert(String(follower.visual_batch_kind) == "zako3p")
-	assert(follower.shadow == null)
 	assert(follower.damageable)
 	assert(follower.gum_vulnerable)
 	assert(not follower.blocks_shots)

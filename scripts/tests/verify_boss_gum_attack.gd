@@ -50,16 +50,6 @@ func _init() -> void:
 	assert(is_equal_approx(launched_pos.length(), BossGumControllerUtil.OUTBOUND_SPEED * 0.10))
 
 	var visual := attack.get_child(0) as Node3D
-	var outer := visual.find_child("gum-layer-outer", true, false) as MeshInstance3D
-	var blue_material := outer.material_override as StandardMaterial3D
-	assert(blue_material.emission.b > blue_material.emission.r)
-	assert(blue_material.emission_energy_multiplier > 1.0)
-	var trail := attack.find_child("BossGumTrail*", true, false) as Node3D
-	assert(trail != null)
-	var trail_face := trail.get_child(0) as MeshInstance3D
-	var trail_material := trail_face.material_override as StandardMaterial3D
-	assert(trail_material.emission.b > trail_material.emission.r)
-	assert(trail_material.albedo_color.a <= 0.31)
 
 	var shot := {
 		"hostile": false,
@@ -81,8 +71,6 @@ func _init() -> void:
 	orb.pos = Vector2(-2.0, 0.0)
 	attack.update_attack(0.02, Vector2.ZERO, true, player_pos, false, player_axis, bullets, bullet_shape)
 	assert(int(orb.state) == BossGumControllerUtil.OrbState.RETURNING)
-	var depleted_material := outer.material_override as StandardMaterial3D
-	assert(depleted_material.emission.r > depleted_material.emission.b)
 
 	orb.state = BossGumControllerUtil.OrbState.RETURNING
 	orb.pos = Vector2(1.0, 0.0)

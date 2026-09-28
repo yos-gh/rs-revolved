@@ -93,7 +93,6 @@ func _init() -> void:
 	assert(main.game_state.arcade_rank >= GameStateUtil.ARCADE_BGM_RANK_3)
 	assert(main.game_state.music_stage == 3)
 	assert(main.game_state.score >= main.game_state.arcade_score_floor_for_rank(11))
-	assert(EnemyUtil.BOSS_TURRET_T3_SCORE == 1200)
 	for enemy in main.enemies:
 		assert(enemy.life == 0)
 

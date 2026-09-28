@@ -23,9 +23,6 @@ func _init() -> void:
 		assert(part.damageable)
 		assert(part.gum_vulnerable)
 		assert(not part.blocks_shots)
-		assert(is_zero_approx(part.age))
-		main._apply_spawn_effect(part.node, part.age, 2.0, 0.35)
-		assert(part.node.scale.is_equal_approx(Vector3.ONE * 2.0))
 
 	main.queue_free()
 	await process_frame

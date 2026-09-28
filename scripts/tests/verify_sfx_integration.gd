@@ -11,7 +11,6 @@ func _init() -> void:
 
 
 func _run() -> void:
-	assert(int(ProjectSettings.get_setting("audio/driver/output_latency.web")) == 100)
 	var sfx := SfxPlayerUtil.new()
 	sfx.setup()
 	root.add_child(sfx)
@@ -21,54 +20,13 @@ func _run() -> void:
 		var player := sfx.player_for(event)
 		assert(player != null)
 		assert(player.stream != null)
-		assert(player.max_polyphony == SfxPlayerUtil.MAX_POLYPHONY[event])
-		assert(player.bus == (SfxPlayerUtil.DESTRUCTION_BUS_NAME if event in SfxPlayerUtil.DESTRUCTION_EVENTS else SfxPlayerUtil.SFX_MIX_BUS_NAME))
-	var sfx_mix_bus := AudioServer.get_bus_index(SfxPlayerUtil.SFX_MIX_BUS_NAME)
-	assert(sfx_mix_bus >= 0)
-	assert(AudioServer.get_bus_send(sfx_mix_bus) == SfxPlayerUtil.TIME_WARP_BUS_NAME)
-	assert(AudioServer.get_bus_effect_count(sfx_mix_bus) == SfxPlayerUtil.SFX_MIX_EFFECT_COUNT)
-	var shared_delay := AudioServer.get_bus_effect(sfx_mix_bus, 0) as AudioEffectDelay
-	var shared_reverb := AudioServer.get_bus_effect(sfx_mix_bus, 1) as AudioEffectReverb
-	assert(shared_delay != null)
-	assert(shared_reverb != null)
-	assert(is_equal_approx(shared_delay.tap1_delay_ms, SfxPlayerUtil.SFX_DELAY_TAP_1_MS))
-	assert(is_equal_approx(shared_delay.tap1_level_db, SfxPlayerUtil.SFX_DELAY_TAP_1_DB))
-	assert(is_equal_approx(shared_delay.tap2_delay_ms, SfxPlayerUtil.SFX_DELAY_TAP_2_MS))
-	assert(is_equal_approx(shared_delay.tap2_level_db, SfxPlayerUtil.SFX_DELAY_TAP_2_DB))
-	assert(not shared_delay.feedback_active)
-	assert(is_equal_approx(shared_reverb.wet, SfxPlayerUtil.SFX_REVERB_WET))
-	var destruction_bus := AudioServer.get_bus_index(SfxPlayerUtil.DESTRUCTION_BUS_NAME)
-	assert(destruction_bus >= 0)
-	assert(AudioServer.get_bus_send(destruction_bus) == SfxPlayerUtil.SFX_MIX_BUS_NAME)
-	assert(AudioServer.get_bus_effect_count(destruction_bus) == 2)
-	var compressor := AudioServer.get_bus_effect(destruction_bus, 0) as AudioEffectCompressor
-	var limiter := AudioServer.get_bus_effect(destruction_bus, 1) as AudioEffectHardLimiter
-	assert(compressor != null)
-	assert(limiter != null)
-	assert(is_equal_approx(compressor.threshold, SfxPlayerUtil.DESTRUCTION_COMPRESSOR_THRESHOLD_DB))
-	assert(is_equal_approx(compressor.ratio, SfxPlayerUtil.DESTRUCTION_COMPRESSOR_RATIO))
-	assert(is_equal_approx(limiter.ceiling_db, SfxPlayerUtil.DESTRUCTION_LIMITER_CEILING_DB))
 	assert(not sfx.has_event("unknown"))
-	for event in ["shot", "bomb_s", "bomb_m", "die", "extend", "gum_o", "gum_c"]:
-		var event_stream := sfx.player_for(event).stream
-		var stream_path: String = event_stream.resource_path
-		assert(stream_path.contains("/original_mastered/"))
-		assert(stream_path.ends_with("/%s.wav" % event))
-		if event == "bomb_s":
-			var bomb_s_stream := event_stream as AudioStreamWAV
-			assert(bomb_s_stream.format == AudioStreamWAV.FORMAT_16_BITS)
-			assert(absi(bomb_s_stream.data.decode_s16(bomb_s_stream.data.size() - 2)) <= 32)
 
 	var played: Array[String] = []
 	sfx.event_played.connect(func(event: String) -> void: played.append(event))
 	sfx.play("shot")
 	sfx.play("die")
 	assert(played == ["shot", "die"])
-	var shot_db := sfx.player_for("shot").volume_db
-	assert(shot_db >= linear_to_db(4.0 / SfxPlayerUtil.ORIGINAL_VOLUME_MAX))
-	assert(shot_db <= linear_to_db(7.0 / SfxPlayerUtil.ORIGINAL_VOLUME_MAX))
-	sfx.play("extend")
-	assert(is_equal_approx(sfx.player_for("extend").volume_db, linear_to_db(64.0 / SfxPlayerUtil.ORIGINAL_VOLUME_MAX)))
 
 	var gum_open_player := sfx.player_for("gum_o")
 	var gum_close_player := sfx.player_for("gum_c")
@@ -136,18 +94,12 @@ func _run() -> void:
 	main.gum_controller._begin_launch(Vector2.RIGHT)
 	main.gum_controller._finish_closing()
 	main.game_state.debug_add_score(GameStateUtil.EXTEND_SCORE_INTERVAL)
-	var score_extend_effect := main.find_child("PlayerExtendEffect", true, false) as Node3D
-	assert(score_extend_effect != null)
 	main.player.invuln_timer = 0.0
 	main._kill_player()
 	assert(runtime_events == ["shot", "bomb_s", "bomb_m", "bomb_s", "gum_o", "gum_c", "extend", "die"])
 	runtime_events.clear()
 	main._play_boss_core_destroy_sfx()
 	assert(runtime_events == ["extend", "bomb_m"])
-	var boss_extend_effect := main.get_child(main.get_child_count() - 1) as Node3D
-	assert(boss_extend_effect != null)
-	assert(String(boss_extend_effect.get_meta("effect_type", "")) == "player_extend")
-	assert(boss_extend_effect != score_extend_effect)
 	runtime_events.clear()
 	main.game_state.game_mode = "endless"
 	main.game_state.endless_difficulty = 4

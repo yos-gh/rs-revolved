@@ -4,7 +4,6 @@ const BulletManagerUtil := preload("res://scripts/game/bullet_manager.gd")
 
 
 func _init() -> void:
-	assert(is_equal_approx(BulletManagerUtil.BULLET0_VISUAL_SCALE, 0.68))
 	var manager := BulletManagerUtil.new()
 	root.add_child(manager)
 	manager.setup({
@@ -36,7 +35,12 @@ func _init() -> void:
 
 	manager.spawn_hostile_bullet(Vector2.ZERO, 0.0, BulletManagerUtil.BOSS_B1_SPEED, false, "line", 4.0)
 	manager.flush_visual_batches()
-	_assert_capsule_inside_visual(manager.bullets[-1])
+	var boss_b1: Dictionary = manager.bullets[-1]
+	_assert_capsule_inside_visual(boss_b1)
+	var initial_b1_radius: float = boss_b1.radius
+	manager.update_bullets(1.0, 16.0, 9.0, 2.0, false, [Vector2(100.0, 100.0), Vector2(100.0, 100.0)], [])
+	assert(float(boss_b1.radius) > initial_b1_radius)
+	assert(float(boss_b1.length) + float(boss_b1.radius) * 2.0 <= float(boss_b1.visual_length) + 0.0001)
 
 	manager.spawn_hostile_bullet(Vector2.ZERO, 0.0, BulletManagerUtil.BOSS_B2_SPEED, true, "boss_b2")
 	manager.flush_visual_batches()

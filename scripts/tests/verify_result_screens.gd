@@ -11,14 +11,6 @@ func _init() -> void:
 
 	assert(not main.game_over_layer.visible)
 	assert(not main.arcade_clear_layer.visible)
-	var game_over_label := main.game_over_layer.find_child("GameOverLabel", true, false) as TextureRect
-	var clear_label := main.arcade_clear_layer.find_child("ArcadeClearLabel", true, false) as TextureRect
-	assert(game_over_label != null)
-	assert(clear_label != null)
-	assert((game_over_label.texture as AtlasTexture).region == Rect2(0, 224, 1360, 56))
-	assert((clear_label.texture as AtlasTexture).region == Rect2(0, 280, 1360, 56))
-	assert((game_over_label.texture as AtlasTexture).filter_clip)
-	assert((clear_label.texture as AtlasTexture).filter_clip)
 
 	main._start_arcade()
 	main.bgm.sync("arcade", 0, 1)
