@@ -2,6 +2,7 @@ extends Node3D
 
 const CollisionUtil := preload("res://scripts/core/collision.gd")
 const BulletTimeGlitchUtil := preload("res://scripts/core/bullet_time_glitch.gd")
+const BackgroundDofUtil := preload("res://scripts/core/background_depth_of_field.gd")
 const DebugOverlayUtil := preload("res://scripts/core/debug_overlay.gd")
 const TimingUtil := preload("res://scripts/core/game_timing.gd")
 const SfxPlayerUtil := preload("res://scripts/core/sfx_player.gd")
@@ -87,6 +88,7 @@ const TUNNEL_FAR_RADIUS := 0.001
 const TUNNEL_NEAR_RADIUS := 24.0
 const TUNNEL_WIRE_MAX_LUMINANCE := 0.46
 const TUNNEL_VISUAL_HEIGHT := 0.018
+const TUNNEL_BASE_SQUASH := 0.58
 const TUNNEL_STREAM_LANES := 4
 const TUNNEL_STREAM_PLATES_PER_LANE := 16
 const TUNNEL_STREAM_HEIGHT := 0.028
@@ -269,6 +271,7 @@ var debug_profile_timer := 0.0
 var debug_profile_log_timer := 0.0
 var debug_profile_text := ""
 var tunnel_root: Node3D
+var background_dof: BackgroundDofUtil
 var tunnel_ring_multimesh: MultiMesh
 var tunnel_radial_multimesh: MultiMesh
 var tunnel_stream_multimesh: MultiMesh
@@ -652,6 +655,12 @@ func _setup_background_tunnel() -> void:
 	tunnel_stream_material = VisualMaterialsUtil.flat_face(Color(0.94, 0.98, 1.0), 0.09, 0.42)
 	var stream_count := TUNNEL_STREAM_LANES * TUNNEL_STREAM_PLATES_PER_LANE if TUNNEL_STREAM_ENABLED else 0
 	tunnel_stream_multimesh = _create_tunnel_stream_multimesh(stream_count, tunnel_stream_material)
+	# The tunnel renders separately and is composited back with a soft depth-of-field blur.
+	for child in tunnel_root.get_children():
+		BackgroundDofUtil.assign_layer(child)
+	background_dof = BackgroundDofUtil.new()
+	add_child(background_dof)
+	background_dof.setup(camera, world_environment.environment, TUNNEL_VISUAL_HEIGHT, TUNNEL_NEAR_RADIUS)
 
 
 func _create_line_multimesh(instance_count: int, material: Material) -> MultiMesh:
@@ -731,6 +740,7 @@ func _update_background_tunnel(delta: float) -> void:
 			radial_index += 1
 	tunnel_ring_multimesh.buffer = ring_buffer
 	tunnel_radial_multimesh.buffer = radial_buffer
+	background_dof.update_focus(_tunnel_center_at(0.0), TUNNEL_BASE_SQUASH)
 
 
 func _update_tunnel_points() -> void:
