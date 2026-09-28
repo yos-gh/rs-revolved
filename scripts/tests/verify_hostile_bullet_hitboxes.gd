@@ -18,7 +18,7 @@ func _init() -> void:
 	assert(bullet0.batched_visual)
 	var bullet0_batch := manager.get_node("BatchedBulletVisuals/bullet0_outer-batch") as MultiMeshInstance3D
 	assert(bullet0_batch != null)
-	assert(bullet0_batch.multimesh.instance_count == 1)
+	assert(bullet0_batch.multimesh.visible_instance_count == 1)
 	assert(float(bullet0.radius) <= _convex_mesh_inradius(bullet0_batch.multimesh.mesh, Vector3.ONE * BulletManagerUtil.BULLET0_VISUAL_SCALE) + 0.0001)
 
 	manager.spawn_hostile_bullet(Vector2.ZERO, 0.0, BulletManagerUtil.BULLET1_SPEED, true, "capsule")

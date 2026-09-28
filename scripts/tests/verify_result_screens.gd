@@ -43,7 +43,7 @@ func _init() -> void:
 		main._process(1.0 / 60.0)
 	assert(main.spawner.generator_counter > spawn_frames_before)
 	assert((spawned_zako4.pos as Vector2) != zako4_pos_before)
-	assert(zako4_multimesh.instance_count > 0)
+	assert(zako4_multimesh.visible_instance_count > 0)
 	assert(main.bgm.current_track == 0)
 	assert(not main.bgm.player.playing)
 

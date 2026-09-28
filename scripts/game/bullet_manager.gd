@@ -7,6 +7,7 @@ signal bullet_break_effect_requested(pos: Vector2, color: Color, drift_direction
 const CollisionUtil := preload("res://scripts/core/collision.gd")
 const PlayerUtil := preload("res://scripts/game/player.gd")
 const VisualMaterialsUtil := preload("res://scripts/core/visual_materials.gd")
+const MultiMeshStreamUtil := preload("res://scripts/core/multimesh_stream.gd")
 
 const SHOT_SPEED := 24.0
 const BULLET0_SPEED := 1.8
@@ -33,6 +34,19 @@ const BULLET3_VISUAL_HALF_WIDTH := 0.045
 const BULLET3_COLLISION_RADIUS := 0.040
 const PLAYER_SHOT_RADIUS := 0.055
 const PLAYER_SHOT_LENGTH := 0.55
+const PLAYER_SHOT_ROLL := deg_to_rad(28.0)
+const PLAYER_SHOT_EDGE_WIDTH := 0.007
+const PLAYER_SHOT_FACE_INDICES := [
+	0, 1, 5, 0, 5, 4,
+	1, 2, 6, 1, 6, 5,
+	2, 3, 7, 2, 7, 6,
+	3, 0, 4, 3, 4, 7,
+]
+const PLAYER_SHOT_EDGES := [
+	[0, 4], [1, 5], [2, 6], [3, 7],
+	[0, 1], [1, 2], [2, 3], [3, 0],
+	[4, 5], [5, 6], [6, 7], [7, 4],
+]
 const LINE_BULLET_LENGTH := 1.15
 const ZAKO_LINE_BULLET_LENGTH := 0.82
 const BOSS_B1_BASE_SCALE := 1.35
@@ -130,6 +144,21 @@ func _setup_visual_batches() -> void:
 	bullet3_inner_material.render_priority = 1
 	_create_batch("bullet3_inner", _box_mesh(Vector3(0.052, 0.052, 1.0)), bullet3_inner_material)
 
+	# Player shots fire every frame, so they share two batched meshes instead of 13 MeshInstances each.
+	var shot_color: Color = _palette.get("shot", Color(0.80, 0.95, 1.0))
+	var shot_roll := Transform3D(Basis.from_euler(Vector3(0.0, 0.0, PLAYER_SHOT_ROLL)), Vector3.ZERO)
+	var shot_points := _player_shot_points()
+	var face_parts := [[shot_points, PackedInt32Array(PLAYER_SHOT_FACE_INDICES), shot_roll]]
+	_create_batch("player_shot_face", _merged_mesh(face_parts), VisualMaterialsUtil.flat_face(shot_color.lightened(0.08), 0.24, 1.12))
+	var edge_parts := []
+	for edge in PLAYER_SHOT_EDGES:
+		var a := shot_points[edge[0]]
+		var b := shot_points[edge[1]]
+		var edge_arrays := _box_mesh(Vector3(PLAYER_SHOT_EDGE_WIDTH, PLAYER_SHOT_EDGE_WIDTH, (b - a).length())).get_mesh_arrays()
+		var edge_transform := Transform3D(Basis(Quaternion(Vector3.FORWARD, (b - a).normalized())), (a + b) * 0.5)
+		edge_parts.append([edge_arrays[Mesh.ARRAY_VERTEX], edge_arrays[Mesh.ARRAY_INDEX], shot_roll * edge_transform])
+	_create_batch("player_shot_edges", _merged_mesh(edge_parts), VisualMaterialsUtil.transparent_outline(shot_color.lightened(0.10), 0.72, 0.72))
+
 
 func _create_batch(key: String, mesh: Mesh, material: Material) -> void:
 	var multimesh := MultiMesh.new()
@@ -142,7 +171,7 @@ func _create_batch(key: String, mesh: Mesh, material: Material) -> void:
 	instance.material_override = material
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_batch_root.add_child(instance)
-	_batch_instances[key] = multimesh
+	_batch_instances[key] = MultiMeshStreamUtil.new(instance)
 
 
 func _polygon_mesh(perimeter: PackedVector3Array) -> ArrayMesh:
@@ -160,6 +189,25 @@ func _polygon_mesh(perimeter: PackedVector3Array) -> ArrayMesh:
 	return mesh
 
 
+func _merged_mesh(parts: Array) -> ArrayMesh:
+	var vertices := PackedVector3Array()
+	var indices := PackedInt32Array()
+	for part in parts:
+		var offset := vertices.size()
+		var part_transform: Transform3D = part[2]
+		for vertex in (part[0] as PackedVector3Array):
+			vertices.append(part_transform * vertex)
+		for index in (part[1] as PackedInt32Array):
+			indices.append(offset + index)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
 func _box_mesh(size: Vector3) -> BoxMesh:
 	var mesh := BoxMesh.new()
 	mesh.size = size
@@ -171,47 +219,58 @@ func _is_batched_visual(display_key: String) -> bool:
 
 
 func _refresh_visual_batches() -> void:
-	var transforms := {}
 	for key in _batch_instances:
-		transforms[key] = []
+		(_batch_instances[key] as MultiMeshStreamUtil).begin()
+	var bullet0_outer := _batch_instances["bullet0_outer"] as MultiMeshStreamUtil
+	var bullet0_inner := _batch_instances["bullet0_inner"] as MultiMeshStreamUtil
+	var bullet0_tail_light := _batch_instances["bullet0_tail_light"] as MultiMeshStreamUtil
+	var bullet0_tail_dark := _batch_instances["bullet0_tail_dark"] as MultiMeshStreamUtil
+	var bullet1_outer := _batch_instances["bullet1_outer"] as MultiMeshStreamUtil
+	var bullet1_inner := _batch_instances["bullet1_inner"] as MultiMeshStreamUtil
+	var bullet2_outer := _batch_instances["bullet2_outer"] as MultiMeshStreamUtil
+	var bullet2_inner := _batch_instances["bullet2_inner"] as MultiMeshStreamUtil
+	var bullet3_outer := _batch_instances["bullet3_outer"] as MultiMeshStreamUtil
+	var bullet3_inner := _batch_instances["bullet3_inner"] as MultiMeshStreamUtil
+	var player_shot_face := _batch_instances["player_shot_face"] as MultiMeshStreamUtil
+	var player_shot_edges := _batch_instances["player_shot_edges"] as MultiMeshStreamUtil
 
 	for bullet in bullets:
 		if not bullet.get("batched_visual", false) or bullet.life <= 0.0:
 			continue
-		var display_key: String = bullet.get("visual_key", "")
+		var display_key: String = bullet.visual_key
 		var root_rotation := _visual_rotation_for_bullet(bullet.angle, "")
 		var root_basis := Basis(Vector3.UP, root_rotation)
+		if display_key == "player_shot":
+			var shot_transform := Transform3D(root_basis, _to_world(bullet.pos, 0.28))
+			player_shot_face.add(shot_transform)
+			player_shot_edges.add(shot_transform)
+			continue
 		var root_origin := _to_world(bullet.pos, 0.25)
 		if display_key == "bullet0":
-			var spin_basis := Basis(Vector3.UP, root_rotation + float(bullet.get("age", 0.0)) * BULLET0_SPIN_SPEED).scaled(Vector3.ONE * BULLET0_VISUAL_SCALE)
+			var spin_basis := Basis(Vector3.UP, root_rotation + float(bullet.age) * BULLET0_SPIN_SPEED).scaled(Vector3.ONE * BULLET0_VISUAL_SCALE)
 			var spin_transform := Transform3D(spin_basis, root_origin)
-			(transforms["bullet0_outer"] as Array).append(spin_transform)
-			(transforms["bullet0_inner"] as Array).append(spin_transform)
-			var tail_key := "bullet0_tail_light" if bullet.get("tail_light", false) else "bullet0_tail_dark"
+			bullet0_outer.add(spin_transform)
+			bullet0_inner.add(spin_transform)
 			var tail_origin := root_origin + root_basis * Vector3(0.0, 0.040, -HOSTILE_DIRECTION_LINE_LENGTH * 0.5)
-			(transforms[tail_key] as Array).append(Transform3D(root_basis, tail_origin))
+			(bullet0_tail_light if bullet.tail_light else bullet0_tail_dark).add(Transform3D(root_basis, tail_origin))
 		elif display_key == "bullet1":
 			var transform := Transform3D(root_basis, root_origin)
-			(transforms["bullet1_outer"] as Array).append(transform)
-			(transforms["bullet1_inner"] as Array).append(transform)
+			bullet1_outer.add(transform)
+			bullet1_inner.add(transform)
 		elif display_key == "bullet2":
 			var transform := Transform3D(root_basis, root_origin)
-			(transforms["bullet2_outer"] as Array).append(transform)
-			(transforms["bullet2_inner"] as Array).append(transform)
+			bullet2_outer.add(transform)
+			bullet2_inner.add(transform)
 		elif display_key == "bullet3":
 			var visual_length: float = bullet.get("visual_length", ZAKO_LINE_BULLET_LENGTH)
 			var outer_basis := _basis_with_local_scale(root_basis, Vector3(1.0, 1.0, visual_length))
-			(transforms["bullet3_outer"] as Array).append(Transform3D(outer_basis, root_origin))
+			bullet3_outer.add(Transform3D(outer_basis, root_origin))
 			var inner_basis := _basis_with_local_scale(root_basis, Vector3(1.0, 1.0, visual_length * 0.90))
 			var inner_origin := root_origin + root_basis * Vector3(0.0, 0.052, 0.0)
-			(transforms["bullet3_inner"] as Array).append(Transform3D(inner_basis, inner_origin))
+			bullet3_inner.add(Transform3D(inner_basis, inner_origin))
 
 	for key in _batch_instances:
-		var multimesh := _batch_instances[key] as MultiMesh
-		var batch_transforms := transforms[key] as Array
-		multimesh.instance_count = batch_transforms.size()
-		for index in batch_transforms.size():
-			multimesh.set_instance_transform(index, batch_transforms[index])
+		(_batch_instances[key] as MultiMeshStreamUtil).commit()
 	_batch_dirty = false
 
 
@@ -221,16 +280,10 @@ func set_game_context(game_mode: String, arcade_rank: int) -> void:
 
 
 func spawn_player_shot(pos: Vector2, angle: float) -> void:
-	var node := Node3D.new()
-	node.name = "PlayerShot-%s" % DISPLAY_NAMES.player_shot.to_pascal_case()
-	node.set_meta("display_name", DISPLAY_NAMES.player_shot)
-	var shot_color: Color = _palette.get("shot", Color(0.80, 0.95, 1.0))
-	node.add_child(_player_shot_wireframe(shot_color))
-	node.position = _to_world(pos, 0.24)
-	node.rotation.y = -angle + PI * 0.5
-	add_child(node)
 	bullets.append({
-		"node": node,
+		"node": null,
+		"visual_key": "player_shot",
+		"batched_visual": true,
 		"pos": pos,
 		"vel": Vector2.from_angle(angle) * SHOT_SPEED,
 		"angle": angle,
@@ -241,6 +294,7 @@ func spawn_player_shot(pos: Vector2, angle: float) -> void:
 		"hostile": false,
 		"gum_blockable": true,
 	})
+	_batch_dirty = true
 
 
 func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gum_blockable := true, shape := "circle", life := DEFAULT_HOSTILE_BULLET_LIFETIME, length_override := 0.0) -> void:
@@ -250,6 +304,7 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 		gum_blockable = true
 	var body := MeshInstance3D.new()
 	var spin_node: Node3D = null
+	var growth_visual: Node3D = null
 	var bullet_visual_length := _length_for_shape(shape, length_override)
 	var bullet_length := bullet_visual_length
 	var bullet_visual_half_width := 0.0
@@ -291,7 +346,8 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 		bullet_visual_half_width = BOSS_B1_VISUAL_HALF_WIDTH
 		bullet_radius = BOSS_B1_COLLISION_RADIUS
 		bullet_length = maxf(0.01, bullet_visual_length - bullet_radius * 2.0)
-		node.add_child(_boss_b1_additive_rect(bullet_visual_length))
+		growth_visual = _boss_b1_additive_rect(bullet_visual_length)
+		node.add_child(growth_visual)
 	elif shape == "capsule" or shape == "line":
 		var mesh := CylinderMesh.new()
 		mesh.top_radius = HOSTILE_CAPSULE_BULLET_RADIUS
@@ -357,6 +413,7 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 		"shot_blockable": is_boss_b2,
 		"tail_light": _uses_light_bullet0_tail(),
 		"spin_node": spin_node,
+		"growth_visual": growth_visual,
 		"break_color": _break_color_for_display_key(display_key),
 	})
 	if batched_visual:
@@ -388,6 +445,7 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 	var live: Array[Dictionary] = []
 	var player_hit := false
 	var player_pos := (player_axis[0] + player_axis[1]) * 0.5
+	var player_reach := player_axis[0].distance_to(player_axis[1]) * 0.5 + PlayerUtil.HIT_RADIUS
 	for bullet in bullets:
 		bullet["expired_by_lifetime"] = false
 		if bullet.get("behavior", "") == "boss_b2":
@@ -414,7 +472,7 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 	_resolve_player_shot_hits_on_destructible_bullets()
 	for bullet in bullets:
 		if bullet.hostile:
-			if player_can_be_hit and _hits_player(bullet, player_axis):
+			if player_can_be_hit and _may_reach_player(bullet, player_pos, player_reach) and _hits_player(bullet, player_axis):
 				bullet.life = 0.0
 				player_hit = true
 		else:
@@ -527,7 +585,7 @@ func _update_boss_b1_growth(bullet: Dictionary) -> void:
 	bullet.radius = float(bullet.get("base_radius", bullet.radius)) * scale
 	bullet.length = float(bullet.get("base_length", bullet.length)) * scale
 	bullet.visual_length = float(bullet.get("base_visual_length", bullet.get("visual_length", 0.0))) * scale
-	var visual := (bullet.node as Node3D).find_child("boss-b1-additive-rect", true, false) as Node3D
+	var visual := bullet.get("growth_visual") as Node3D
 	if visual != null:
 		visual.scale = Vector3(scale, scale, scale)
 
@@ -559,6 +617,14 @@ func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], dama
 			enemy.life -= damage
 			hit = true
 	return hit
+
+
+# Cheap bounding-circle reject so the exact capsule test only runs for bullets near the player.
+func _may_reach_player(bullet: Dictionary, player_pos: Vector2, player_reach: float) -> bool:
+	var reach: float = player_reach + bullet.radius + 0.001
+	if bullet.shape == "capsule":
+		reach += float(bullet.length) * 0.5
+	return (bullet.pos as Vector2).distance_squared_to(player_pos) <= reach * reach
 
 
 func _hits_player(bullet: Dictionary, player_axis: Array[Vector2]) -> bool:
@@ -606,11 +672,20 @@ func _direction_line_mesh(length: float, width: float, color: Color) -> MeshInst
 func _player_shot_wireframe(color: Color) -> Node3D:
 	var root := Node3D.new()
 	root.name = "player-shot-wireframe"
-	root.rotation.z = deg_to_rad(28.0)
+	root.rotation.z = PLAYER_SHOT_ROLL
+	var points := _player_shot_points()
+	root.add_child(_array_mesh(points, PackedInt32Array(PLAYER_SHOT_FACE_INDICES), VisualMaterialsUtil.flat_face(color.lightened(0.08), 0.24, 1.12)))
+	var edge_color := color.lightened(0.10)
+	for edge in PLAYER_SHOT_EDGES:
+		root.add_child(_edge_mesh(points[edge[0]], points[edge[1]], edge_color, PLAYER_SHOT_EDGE_WIDTH))
+	return root
+
+
+func _player_shot_points() -> PackedVector3Array:
 	var half_width := 0.036
 	var half_height := 0.044
 	var half_length := PLAYER_SHOT_LENGTH * 0.5
-	var points := PackedVector3Array([
+	return PackedVector3Array([
 		Vector3(0.0, half_height, -half_length),
 		Vector3(half_width, 0.0, -half_length),
 		Vector3(0.0, -half_height, -half_length),
@@ -620,21 +695,6 @@ func _player_shot_wireframe(color: Color) -> Node3D:
 		Vector3(0.0, -half_height, half_length),
 		Vector3(-half_width, 0.0, half_length),
 	])
-	var face_indices := PackedInt32Array([
-		0, 1, 5, 0, 5, 4,
-		1, 2, 6, 1, 6, 5,
-		2, 3, 7, 2, 7, 6,
-		3, 0, 4, 3, 4, 7,
-	])
-	root.add_child(_array_mesh(points, face_indices, VisualMaterialsUtil.flat_face(color.lightened(0.08), 0.24, 1.12)))
-	var edge_color := color.lightened(0.10)
-	for edge in [
-		[0, 4], [1, 5], [2, 6], [3, 7],
-		[0, 1], [1, 2], [2, 3], [3, 0],
-		[4, 5], [5, 6], [6, 7], [7, 4],
-	]:
-		root.add_child(_edge_mesh(points[edge[0]], points[edge[1]], edge_color, 0.007))
-	return root
 
 
 func _bullet0_rugby_spindle() -> Node3D:

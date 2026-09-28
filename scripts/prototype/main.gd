@@ -24,6 +24,7 @@ const MENU_ATLAS := preload("res://assets/ui/original_svg/menu.svg")
 const TITLE_ATLAS := preload("res://assets/ui/original_svg/title.svg")
 const VisualMaterialsUtil := preload("res://scripts/core/visual_materials.gd")
 const VisualMotionUtil := preload("res://scripts/core/visual_motion.gd")
+const MultiMeshStreamUtil := preload("res://scripts/core/multimesh_stream.gd")
 
 const BASE_FIELD_W := PlayfieldUtil.BASE_FIELD_W
 const BASE_FIELD_H := PlayfieldUtil.BASE_FIELD_H
@@ -271,6 +272,10 @@ var tunnel_root: Node3D
 var tunnel_ring_multimesh: MultiMesh
 var tunnel_radial_multimesh: MultiMesh
 var tunnel_stream_multimesh: MultiMesh
+var tunnel_ring_buffer := PackedFloat32Array()
+var tunnel_radial_buffer := PackedFloat32Array()
+var tunnel_points := PackedVector2Array()
+var tunnel_ring_depths := PackedFloat32Array()
 var tunnel_stream_material: Material
 var tunnel_ring_material: StandardMaterial3D
 var tunnel_radial_material: StandardMaterial3D
@@ -289,6 +294,8 @@ var scanline_time := 0.0
 var aim_reticle: Node3D
 var aim_reticle_sweep: Node3D
 var aim_reticle_fire_blend := 0.0
+var aim_reticle_applied_blend := -1.0
+var shared_unit_box_mesh: BoxMesh
 var player_shadow: Node3D
 var aim_reticle_timer := 0.0
 var backfire_timer := 0.0
@@ -638,6 +645,10 @@ func _setup_background_tunnel() -> void:
 	tunnel_radial_material = _material(color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
 	tunnel_ring_multimesh = _create_line_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, tunnel_ring_material)
 	tunnel_radial_multimesh = _create_line_multimesh((TUNNEL_RING_COUNT - 1) * TUNNEL_SEGMENTS, tunnel_radial_material)
+	tunnel_ring_buffer.resize(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS * 12)
+	tunnel_radial_buffer.resize((TUNNEL_RING_COUNT - 1) * TUNNEL_SEGMENTS * 12)
+	tunnel_points.resize(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS)
+	tunnel_ring_depths.resize(TUNNEL_RING_COUNT)
 	tunnel_stream_material = VisualMaterialsUtil.flat_face(Color(0.94, 0.98, 1.0), 0.09, 0.42)
 	var stream_count := TUNNEL_STREAM_LANES * TUNNEL_STREAM_PLATES_PER_LANE if TUNNEL_STREAM_ENABLED else 0
 	tunnel_stream_multimesh = _create_tunnel_stream_multimesh(stream_count, tunnel_stream_material)
@@ -692,25 +703,85 @@ func _update_background_tunnel(delta: float) -> void:
 	scanline_time += delta * (0.10 + tunnel_speed * 0.035)
 	_update_scanlines()
 	_update_tunnel_stream_plates()
+	_update_tunnel_points()
+	# Build both wire batches as raw MultiMesh buffers: one upload per batch instead of ~1900 per-instance calls.
+	var ring_buffer := tunnel_ring_buffer
+	var radial_buffer := tunnel_radial_buffer
+	var points := tunnel_points
 	var ring_index := 0
 	var radial_index := 0
 	for ring in range(TUNNEL_RING_COUNT):
+		var depth := tunnel_ring_depths[ring]
+		var ring_width := _tunnel_line_width(depth, false)
+		var has_next_ring := ring < TUNNEL_RING_COUNT - 1
+		var next_depth := tunnel_ring_depths[ring + 1] if has_next_ring else 0.0
+		var radial_width := _tunnel_line_width((depth + next_depth) * 0.5, true)
+		var row := ring * TUNNEL_SEGMENTS
 		for segment in range(TUNNEL_SEGMENTS):
-			var a := _tunnel_point(ring, segment)
-			var b := _tunnel_point(ring, (segment + 1) % TUNNEL_SEGMENTS)
-			tunnel_ring_multimesh.set_instance_transform(ring_index, _line_transform(a, b, _tunnel_line_width(_tunnel_depth(ring), false)))
+			var a := points[row + segment]
+			var b := points[row + (segment + 1) % TUNNEL_SEGMENTS]
+			_write_line_instance(ring_buffer, ring_index, a, b, ring_width)
 			ring_index += 1
-			if ring >= TUNNEL_RING_COUNT - 1:
+			if not has_next_ring:
 				continue
-			var depth := _tunnel_depth(ring)
-			var next_depth := _tunnel_depth(ring + 1)
 			if segment % tunnel_density_stride != 0 or next_depth <= depth:
-				tunnel_radial_multimesh.set_instance_transform(radial_index, Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
-				radial_index += 1
-				continue
-			var radial_b := _tunnel_point(ring + 1, segment)
-			tunnel_radial_multimesh.set_instance_transform(radial_index, _line_transform(a, radial_b, _tunnel_line_width((depth + next_depth) * 0.5, true)))
+				_write_hidden_instance(radial_buffer, radial_index)
+			else:
+				_write_line_instance(radial_buffer, radial_index, a, points[row + TUNNEL_SEGMENTS + segment], radial_width)
 			radial_index += 1
+	tunnel_ring_multimesh.buffer = ring_buffer
+	tunnel_radial_multimesh.buffer = radial_buffer
+
+
+func _update_tunnel_points() -> void:
+	# Per-ring terms (center, radius, squash, twist) are shared by every segment, so compute them once per ring.
+	var twist_rate := 0.30 + sin(tunnel_time * 0.19) * 0.18
+	var base_twist := tunnel_time * 0.72
+	var index := 0
+	for ring in range(TUNNEL_RING_COUNT):
+		var depth := _tunnel_depth(ring)
+		tunnel_ring_depths[ring] = depth
+		var normalized_depth := depth / float(TUNNEL_RING_COUNT - 1)
+		var radius := lerpf(TUNNEL_FAR_RADIUS, TUNNEL_NEAR_RADIUS, pow(normalized_depth, 2.80))
+		var center := _tunnel_center_at(normalized_depth)
+		var squash_radius := radius * (0.58 + sin(tunnel_time * 0.29 + depth * 0.14) * 0.12)
+		var angle_offset := depth * twist_rate + base_twist + sin(tunnel_time * 0.31 + depth * 0.23) * 0.55
+		for segment in range(TUNNEL_SEGMENTS):
+			var angle := float(segment) / float(TUNNEL_SEGMENTS) * TAU + angle_offset
+			tunnel_points[index] = center + Vector2(cos(angle) * radius, sin(angle) * squash_radius)
+			index += 1
+
+
+# Writes the same transform as _line_transform() straight into a TRANSFORM_3D MultiMesh buffer (row-major 3x4).
+func _write_line_instance(buffer: PackedFloat32Array, instance: int, a: Vector2, b: Vector2, width: float) -> void:
+	var dx := b.x - a.x
+	var dy := b.y - a.y
+	var length := sqrt(dx * dx + dy * dy)
+	var ux := 1.0
+	var uy := 0.0
+	if length > 0.0:
+		ux = dx / length
+		uy = dy / length
+	var z_scale := maxf(0.01, length)
+	var o := instance * 12
+	buffer[o] = width * uy
+	buffer[o + 1] = 0.0
+	buffer[o + 2] = ux * z_scale
+	buffer[o + 3] = (a.x + b.x) * 0.5
+	buffer[o + 4] = 0.0
+	buffer[o + 5] = width
+	buffer[o + 6] = 0.0
+	buffer[o + 7] = TUNNEL_VISUAL_HEIGHT
+	buffer[o + 8] = -width * ux
+	buffer[o + 9] = 0.0
+	buffer[o + 10] = uy * z_scale
+	buffer[o + 11] = (a.y + b.y) * 0.5
+
+
+func _write_hidden_instance(buffer: PackedFloat32Array, instance: int) -> void:
+	var o := instance * 12
+	for i in range(12):
+		buffer[o + i] = 0.0
 
 
 func _update_tunnel_stream_plates() -> void:
@@ -996,7 +1067,9 @@ func _update_aim_reticle(delta: float) -> void:
 	var firing := Input.is_action_pressed("fire")
 	var target_blend := 1.0 if firing else 0.0
 	aim_reticle_fire_blend = move_toward(aim_reticle_fire_blend, target_blend, delta * 7.5)
-	_apply_mousetarget_reticle_state(aim_reticle, aim_reticle_fire_blend)
+	if aim_reticle_fire_blend != aim_reticle_applied_blend:
+		aim_reticle_applied_blend = aim_reticle_fire_blend
+		_apply_mousetarget_reticle_state(aim_reticle, aim_reticle_fire_blend)
 	if aim_reticle_sweep != null:
 		var sweep_speed := 15.0 if firing else 8.0
 		aim_reticle_sweep.rotate_y(delta * sweep_speed)
@@ -2674,6 +2747,7 @@ func _create_enemy_visual_batch_entries(
 		enemy_visual_batch_root.add_child(instance)
 		entries.append({
 			"multimesh": multimesh,
+			"stream": MultiMeshStreamUtil.new(instance),
 			"local_transform": part.transform,
 		})
 	return entries
@@ -2683,37 +2757,43 @@ func _clear_enemy_visual_batches() -> void:
 	for batch in enemy_visual_batches.values():
 		for key in ["visual_entries", "shadow_entries"]:
 			for entry in batch[key]:
-				var multimesh := entry.multimesh as MultiMesh
-				multimesh.instance_count = 0
+				(entry.stream as MultiMeshStreamUtil).clear()
+		batch["drawn_count"] = 0
 
 
 func _update_enemy_visual_batches() -> void:
 	if enemy_visual_batches.is_empty():
 		return
 	var grouped := {}
-	for kind in BATCHED_ENEMY_KINDS:
+	for kind in enemy_visual_batches:
 		grouped[kind] = []
 	for enemy in enemies:
 		var kind := String(enemy.get("visual_batch_kind", ""))
-		if kind != "":
-			grouped[kind].append(enemy)
-	for kind in grouped.keys():
+		if kind == "":
+			continue
+		if not grouped.has(kind):
+			grouped[kind] = []
+		grouped[kind].append(enemy)
+	for kind in grouped:
 		var batch := _ensure_enemy_visual_batch(kind)
 		var batch_enemies: Array = grouped[kind]
+		# Kinds that are already empty on screen need no re-upload.
+		if batch_enemies.is_empty() and int(batch.get("drawn_count", 0)) == 0:
+			continue
 		_update_enemy_visual_batch_entries(batch.visual_entries, batch_enemies, false)
 		_update_enemy_visual_batch_entries(batch.shadow_entries, batch_enemies, true)
+		batch["drawn_count"] = batch_enemies.size()
 
 
 func _update_enemy_visual_batch_entries(entries: Array, batch_enemies: Array, shadow: bool) -> void:
 	for entry in entries:
-		var multimesh := entry.multimesh as MultiMesh
-		multimesh.instance_count = batch_enemies.size()
-	for enemy_index in range(batch_enemies.size()):
-		var enemy: Dictionary = batch_enemies[enemy_index]
+		(entry.stream as MultiMeshStreamUtil).begin()
+	for enemy in batch_enemies:
 		var base_transform := _enemy_batch_shadow_transform(enemy) if shadow else _enemy_batch_visual_transform(enemy)
 		for entry in entries:
-			var multimesh := entry.multimesh as MultiMesh
-			multimesh.set_instance_transform(enemy_index, base_transform * (entry.local_transform as Transform3D))
+			(entry.stream as MultiMeshStreamUtil).add(base_transform * (entry.local_transform as Transform3D))
+	for entry in entries:
+		(entry.stream as MultiMeshStreamUtil).commit()
 
 
 func _enemy_batch_visual_transform(enemy: Dictionary) -> Transform3D:
@@ -3538,9 +3618,8 @@ func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.R
 		tail.name = "HitEffectTail"
 		tail.set_meta("hit_piece", "tail")
 		tail.set_meta("spark_direction", direction)
-		var tail_mesh := BoxMesh.new()
-		tail_mesh.size = Vector3(width, 0.006, tail_length)
-		tail.mesh = tail_mesh
+		tail.mesh = _unit_box_mesh()
+		tail.scale = Vector3(width, 0.006, tail_length)
 		tail.position = _to_world(direction * (gap + tail_length * 0.5), randf_range(0.00, 0.045))
 		tail.rotation = Vector3(randf_range(-0.16, 0.16), -angle + PI * 0.5, randf_range(-0.13, 0.13))
 		tail.material_override = tail_mat
@@ -3549,9 +3628,8 @@ func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.R
 		tip.name = "HitEffectTip"
 		tip.set_meta("hit_piece", "tip")
 		tip.set_meta("spark_direction", direction)
-		var tip_mesh := BoxMesh.new()
-		tip_mesh.size = Vector3(width * 0.72, 0.006, tip_length)
-		tip.mesh = tip_mesh
+		tip.mesh = _unit_box_mesh()
+		tip.scale = Vector3(width * 0.72, 0.006, tip_length)
 		tip.position = _to_world(direction * (gap + tail_length + tip_length * 0.5), randf_range(0.00, 0.045))
 		tip.rotation = tail.rotation
 		tip.material_override = tip_mat
@@ -3564,6 +3642,14 @@ func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.R
 	tween.parallel().tween_property(tip_mat, "albedo_color", Color(spark_color.r, spark_color.g, spark_color.b, 0.0), randf_range(0.14, 0.22))
 	tween.tween_callback(flash.queue_free)
 	return flash
+
+
+# Shared by frequently spawned effect pieces so each spark does not build its own box geometry.
+func _unit_box_mesh() -> BoxMesh:
+	if shared_unit_box_mesh == null:
+		shared_unit_box_mesh = BoxMesh.new()
+		shared_unit_box_mesh.size = Vector3.ONE
+	return shared_unit_box_mesh
 
 
 func _spawn_boss_core_unlock_effect(pos: Vector2) -> void:
@@ -5290,7 +5376,10 @@ func _set_line_mesh(line: MeshInstance3D, a: Vector2, b: Vector2, width: float) 
 	var dir := b - a
 	var mesh := line.mesh as BoxMesh
 	if mesh != null:
-		mesh.size = Vector3(width, width, maxf(0.01, dir.length()))
+		# Resizing a BoxMesh rebuilds its geometry, so keep a unit box and animate the node scale instead.
+		if mesh.size != Vector3.ONE:
+			mesh.size = Vector3.ONE
+		line.scale = Vector3(width, width, maxf(0.01, dir.length()))
 	line.position = _to_world(mid, 0.018)
 	line.rotation.y = -dir.angle() + PI * 0.5
 
