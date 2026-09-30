@@ -18,6 +18,15 @@ const VISUAL_MAX_BANK := deg_to_rad(40.0)
 const VISUAL_MAX_PITCH := deg_to_rad(24.0)
 const VISUAL_RESPONSE := 9.0
 const VISUAL_TURN_REFERENCE := 8.0
+# Exhaust flame at the cannon's rear, where the backfire smoke leaves the ship.
+const FLAME_ORIGIN := Vector3(0.0, 0.03, 0.44)
+const FLAME_COLOR := Color(1.0, 0.55, 0.20)
+const FLAME_HOT_COLOR := Color(1.0, 0.90, 0.55)
+const FLAME_PLATES := 3
+const FLAME_LENGTH := 0.24
+const FLAME_PLATE_SIZE := 0.13
+const FLAME_FLICKER_SPEED := 41.0
+const FLAME_FLICKER_DEPTH := 0.14
 
 var pos := Vector2.ZERO
 var angle := 0.0
@@ -26,10 +35,12 @@ var alive := true
 var respawn_timer := 0.0
 var invuln_timer := INVULN_TIME
 var visual_model: Node3D
+var exhaust_flame: Node3D
 
 var _shot_timer := 0.0
 var _palette := {}
 var _previous_visual_angle := 0.0
+var _flame_phase := 0.0
 
 
 func setup(palette: Dictionary) -> void:
@@ -43,6 +54,7 @@ func setup(palette: Dictionary) -> void:
 		_add_box_part(model, Vector3(side * 0.34, 0.04, 0.07), Vector3(0.25, 0.15, 0.38), _palette.player.darkened(0.14))
 		_add_box_part(model, Vector3(side * 0.34, 0.11, -0.10), Vector3(0.17, 0.07, 0.20), _palette.player.lightened(0.04))
 		_add_edge(model, Vector3(side * 0.23, 0.12, 0.28), Vector3(side * 0.45, 0.12, 0.28), 0.014, _palette.player_core, 0.38, 0.95)
+	exhaust_flame = _add_exhaust_flame(model)
 	add_child(model)
 
 	var hit_axis_preview := _line_mesh(Vector2(0.0, -HIT_FRONT), Vector2(0.0, HIT_BACK), HIT_RADIUS * 2.0, Color(1.0, 0.88, 0.36, 0.85))
@@ -100,6 +112,8 @@ func update_motion(delta: float, field_w: float, field_h: float, margin: float) 
 	_previous_visual_angle = angle
 	_update_visual_motion(world_motion, turn_input, delta)
 	visible = invuln_timer <= 0.0 or int(invuln_timer * 18.0) % 2 == 0
+	_flame_phase = fmod(_flame_phase + delta * FLAME_FLICKER_SPEED, TAU)
+	exhaust_flame.scale = Vector3.ONE * (1.0 - FLAME_FLICKER_DEPTH + FLAME_FLICKER_DEPTH * sin(_flame_phase))
 
 	_shot_timer -= delta
 	if Input.is_action_pressed("fire") and _shot_timer <= 0.0:
@@ -204,6 +218,26 @@ func _add_player_center_cannon(root: Node3D, lift: float) -> void:
 	core.position = Vector3(0.0, 0.18 + lift, -0.08)
 	core.material_override = _transparent_material(Color(_palette.player_core.r, _palette.player_core.g, _palette.player_core.b, 0.48), _palette.player_core, 1.55)
 	root.add_child(core)
+
+
+func _add_exhaust_flame(root: Node3D) -> Node3D:
+	# 45-degree square plates like the backfire smoke: small and hot at the nozzle, cooling outward.
+	var flame := Node3D.new()
+	flame.name = "ExhaustFlame"
+	flame.position = FLAME_ORIGIN
+	root.add_child(flame)
+	for i in range(FLAME_PLATES):
+		var t := float(i) / float(FLAME_PLATES - 1)
+		var plate := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		var plate_size := FLAME_PLATE_SIZE * (1.0 - t * 0.55)
+		mesh.size = Vector3(plate_size, 0.006, plate_size)
+		plate.mesh = mesh
+		plate.position = Vector3(0.0, -0.004 * float(i), t * FLAME_LENGTH)
+		plate.rotation.y = PI * 0.25
+		plate.material_override = VisualMaterialsUtil.outline(FLAME_HOT_COLOR.lerp(FLAME_COLOR, t), 0.78 - t * 0.38, 1.3 - t * 0.6)
+		flame.add_child(plate)
+	return flame
 
 
 func _add_box_part(root: Node3D, center: Vector3, size: Vector3, color: Color) -> void:
