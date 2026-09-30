@@ -11,6 +11,11 @@ const GUM_MIN_RATIO := 0.18
 const TENSION_COLOR := Color(0.50, 0.88, 0.38, 0.88)
 const GUM_COLOR := Color(0.38, 0.50, 0.88, 0.88)
 const GUM_LOW_COLOR := Color(0.88, 0.50, 0.38, 0.90)
+# A brief glow when Gum becomes usable again or a meter tops out.
+const READY_FLASH_TIME := 0.55
+# Tension decays every frame, so "full" is a band with hysteresis rather than exactly 1.0.
+const TENSION_FULL_RATIO := 0.995
+const TENSION_REARM_RATIO := 0.90
 
 var score_digits: BitmapNumber
 var life_digit: BitmapNumber
@@ -22,6 +27,9 @@ var tension_track: ColorRect
 var tension_fill: ColorRect
 var gum_ratio := 1.0
 var tension_ratio := 0.0
+var gum_flash := 0.0
+var tension_flash := 0.0
+var tension_flash_armed := true
 
 
 func setup() -> void:
@@ -51,7 +59,7 @@ func setup() -> void:
 	gum_threshold.size = Vector2(2.0, 12.0)
 	gum_track.add_child(gum_threshold)
 
-	life_digit = _add_bitmap_number(ZANKI_ATLAS, Vector2(-HUD_MARGIN - 30.0 * NUMBER_SCALE, -42.0), true, true, NUMBER_SCALE)
+	life_digit = _add_bitmap_number(ZANKI_ATLAS, Vector2(-HUD_MARGIN - 30.0 * NUMBER_SCALE, -48.0), true, true, NUMBER_SCALE)
 	life_digit.set_number(0, 1, 1)
 	_update_meter_geometry()
 
@@ -59,9 +67,18 @@ func setup() -> void:
 func update_values(score: int, _hi_score: int, lives: int, gum_energy: float, tension: float, _phase: String, _rank: int, _life_state: String, _gum_state: String, debug_text: String) -> void:
 	score_digits.set_number(score, 9, 9)
 	life_digit.set_number(lives, 1, 1)
-	gum_ratio = clampf(gum_energy, 0.0, 1.0)
-	tension_ratio = clampf(tension / 360.0, 0.0, 1.0)
-	gum_fill.color = GUM_LOW_COLOR if gum_ratio < GUM_MIN_RATIO else GUM_COLOR
+	var next_gum := clampf(gum_energy, 0.0, 1.0)
+	var next_tension := clampf(tension / 360.0, 0.0, 1.0)
+	if (gum_ratio <= GUM_MIN_RATIO and next_gum > GUM_MIN_RATIO) or (gum_ratio < 1.0 and next_gum >= 1.0):
+		gum_flash = 1.0
+	if next_tension < TENSION_REARM_RATIO:
+		tension_flash_armed = true
+	elif tension_flash_armed and next_tension >= TENSION_FULL_RATIO:
+		tension_flash_armed = false
+		tension_flash = 1.0
+	gum_ratio = next_gum
+	tension_ratio = next_tension
+	_apply_fill_colors()
 	debug_label.text = debug_text
 	debug_label.visible = not debug_text.is_empty()
 	_update_meter_geometry()
@@ -72,9 +89,50 @@ func _notification(what: int) -> void:
 		_update_meter_geometry()
 
 
+func _process(delta: float) -> void:
+	if gum_flash <= 0.0 and tension_flash <= 0.0:
+		return
+	gum_flash = maxf(0.0, gum_flash - delta / READY_FLASH_TIME)
+	tension_flash = maxf(0.0, tension_flash - delta / READY_FLASH_TIME)
+	_apply_fill_colors()
+	queue_redraw()
+
+
+func _apply_fill_colors() -> void:
+	gum_fill.color = GUM_LOW_COLOR if gum_ratio < GUM_MIN_RATIO else _flash_color(GUM_COLOR, gum_flash)
+	tension_fill.color = _flash_color(TENSION_COLOR, tension_flash)
+
+
+func _flash_color(color: Color, flash: float) -> Color:
+	return color.lerp(Color(color.lightened(0.55), 1.0), _flash_curve(flash))
+
+
+func _flash_curve(flash: float) -> float:
+	# Quick rise, soft tail.
+	return flash * flash
+
+
+func _draw() -> void:
+	if not is_instance_valid(gum_track) or not is_instance_valid(tension_track):
+		return
+	_draw_meter_glow(tension_fill, TENSION_COLOR, tension_flash)
+	_draw_meter_glow(gum_fill, GUM_COLOR, gum_flash)
+
+
+func _draw_meter_glow(fill: ColorRect, color: Color, flash: float) -> void:
+	if flash <= 0.0 or fill.size.x <= 0.0:
+		return
+	var rect := Rect2(fill.get_parent().position + fill.position, fill.size)
+	var strength := _flash_curve(flash)
+	var glow := color.lightened(0.3)
+	for layer in [[6.0, 0.10], [3.0, 0.18], [1.0, 0.30]]:
+		draw_rect(rect.grow_individual(layer[0], layer[0], layer[0], layer[0]), Color(glow, layer[1] * strength))
+
+
 func _sync_viewport_size() -> void:
 	size = get_viewport_rect().size
 	_update_meter_geometry()
+	queue_redraw()
 
 
 func _add_bitmap_number(atlas: Texture2D, offset: Vector2, anchor_right := false, anchor_bottom := false, display_scale := 1.0) -> BitmapNumber:
@@ -100,8 +158,9 @@ func _add_edge_meter(meter_name: String, at_bottom: bool) -> ColorRect:
 	if at_bottom:
 		track.anchor_top = 1.0
 		track.anchor_bottom = 1.0
-		track.offset_top = -20.0
-		track.offset_bottom = -17.0
+		# Mirrors the Tension track: 18px from the edge, same gap to the life digit as to the score.
+		track.offset_top = -21.0
+		track.offset_bottom = -18.0
 	else:
 		track.offset_top = 18.0
 		track.offset_bottom = 21.0
