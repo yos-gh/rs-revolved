@@ -60,7 +60,7 @@ jobs:
           mkdir -p "${GAME_DIR}"
           "${GODOT_BIN}" --headless --path . --export-release Web "${GAME_DIR}/index.html"
           rm -f "${GAME_DIR}/sentry-bundle.js" "${GAME_DIR}/sentry-bundle.js.map"
-          cp web/index.html export/web/index.html
+          cp web/index.html web/site.css export/web/
           sed -i "s#game/index.html#game/${BUILD_ID}/index.html#" export/web/index.html
           mkdir -p export/web/game
           cat > export/web/game/index.html <<EOF
