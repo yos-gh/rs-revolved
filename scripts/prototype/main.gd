@@ -101,6 +101,10 @@ const TUNNEL_FAR_RADIUS := 0.001
 const TUNNEL_NEAR_RADIUS := 24.0
 const TUNNEL_WIRE_MAX_LUMINANCE := 0.46
 const TUNNEL_VISUAL_HEIGHT := 0.018
+# The camera is orthographic, so the background layer (floor, tunnel composite, scanlines,
+# shadows) sits well below the playfield without changing the picture. Tilted models can
+# then dip below y = 0 without the background occluding them.
+const BACKGROUND_DEPTH_DROP := 6.0
 const TUNNEL_BASE_SQUASH := 0.58
 const TUNNEL_STREAM_LANES := 4
 const TUNNEL_STREAM_PLATES_PER_LANE := 16
@@ -644,6 +648,7 @@ func _setup_floor() -> void:
 	plane.mesh = mesh
 	floor_material = _floor_material()
 	plane.material_override = floor_material
+	plane.position.y = -BACKGROUND_DEPTH_DROP
 	add_child(plane)
 	floor_plane = plane
 
@@ -673,7 +678,7 @@ func _setup_background_tunnel() -> void:
 		BackgroundDofUtil.assign_layer(child)
 	background_dof = BackgroundDofUtil.new()
 	add_child(background_dof)
-	background_dof.setup(camera, world_environment.environment, TUNNEL_VISUAL_HEIGHT, TUNNEL_NEAR_RADIUS)
+	background_dof.setup(camera, world_environment.environment, TUNNEL_VISUAL_HEIGHT - BACKGROUND_DEPTH_DROP, TUNNEL_NEAR_RADIUS)
 
 
 func _create_line_multimesh(instance_count: int, material: Material) -> MultiMesh:
@@ -710,6 +715,7 @@ func _create_tunnel_stream_multimesh(instance_count: int, material: Material) ->
 func _setup_scanlines() -> void:
 	scanline_root = Node3D.new()
 	scanline_root.name = "RisingScanlines"
+	scanline_root.position.y = -BACKGROUND_DEPTH_DROP
 	add_child(scanline_root)
 	scanlines.clear()
 	for i in range(SCANLINE_COUNT):
@@ -1016,7 +1022,7 @@ func _tunnel_shadow_transform(logical_pos: Vector2, visual_yaw: float, visual_sc
 	shadow_scale.x *= projection_scale.x
 	shadow_scale.z *= projection_scale.z
 	var basis := Basis(Vector3.UP, float(projection["yaw"])).scaled(shadow_scale)
-	return Transform3D(basis, _to_world(projected_pos, TUNNEL_SHADOW_HEIGHT))
+	return Transform3D(basis, _to_world(projected_pos, TUNNEL_SHADOW_HEIGHT - BACKGROUND_DEPTH_DROP))
 
 
 func _yaw_from_direction(direction: Vector2) -> float:
