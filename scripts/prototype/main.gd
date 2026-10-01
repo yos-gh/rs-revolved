@@ -76,6 +76,14 @@ const BOSS_RIBBON_EDGE_WIDTH := 0.010
 const BOSS_CONNECTION_PULSES := 3
 const BOSS_CORE_GEM_STRETCH := 1.45
 const BOSS_CORE_GEM_TILT := 0.55
+# Destruction punctuation: a hot flash plate and a hairline shockwave ring per burst.
+const DESTROY_FLASH_TIME := 0.12
+const DESTROY_RING_TIME := 0.34
+const DESTROY_RING_WIDTH := 0.05
+# Rings tip by up to this much toward or away from the camera so they read as ellipses in space.
+const SHOCKWAVE_MAX_TILT := 1.05
+# Bullet cancels can arrive by the hundred; cap the little rings spawned per frame.
+const BULLET_BREAK_RINGS_PER_FRAME := 6
 # Turret bodies: fainter fills and firmer outlines so stacked boxes read as one machine.
 const BOSS_TURRET_FACE_ALPHA_SCALE := 0.62
 const BOSS_TURRET_EDGE_ALPHA := 0.38
@@ -316,6 +324,9 @@ var aim_reticle_sweep: Node3D
 var aim_reticle_fire_blend := 0.0
 var aim_reticle_applied_blend := -1.0
 var shared_unit_box_mesh: BoxMesh
+var shockwave_ring_meshes := {}
+var bullet_break_ring_frame := -1
+var bullet_break_rings_this_frame := 0
 var player_shadow: Node3D
 var aim_reticle_timer := 0.0
 var backfire_timer := 0.0
@@ -1201,10 +1212,12 @@ func _setup_bgm() -> void:
 
 func _play_gum_open() -> void:
 	sfx.play("gum_o")
+	_spawn_shockwave_ring(gum_controller.center, palette.gum, 1.5, 0.30)
 
 
 func _play_gum_close() -> void:
 	sfx.play("gum_c")
+	_spawn_shockwave_ring(gum_controller.center, palette.gum, 1.1, 0.24)
 
 
 func _play_extend() -> void:
@@ -3658,11 +3671,14 @@ func _spawn_enemy_destroy_effect(pos: Vector2, color: Color, radius: float, acce
 		piece.set_meta("target_distance", target_distance)
 		var duration := randf_range(0.38, 0.62) * clampf(sqrt(size_factor), 0.85, 1.40)
 		var tween := create_tween()
-		tween.parallel().tween_property(piece, "position", _to_world(dir * target_distance, randf_range(0.16, 0.36)), duration)
-		tween.parallel().tween_property(piece, "rotation", piece.rotation + Vector3(randf_range(-2.2, 2.2), randf_range(1.6, 4.4), randf_range(-2.2, 2.2)), duration)
+		# Debris leaves fast and coasts to a stop rather than drifting at constant speed.
+		tween.parallel().tween_property(piece, "position", _to_world(dir * target_distance, randf_range(0.16, 0.36)), duration).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		tween.parallel().tween_property(piece, "rotation", piece.rotation + Vector3(randf_range(-2.2, 2.2), randf_range(1.6, 4.4), randf_range(-2.2, 2.2)), duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		tween.parallel().tween_property(piece, "scale", Vector3(randf_range(0.45, 0.85), 0.18, randf_range(0.45, 0.85)), duration)
 	burst.position = _to_world(pos, 0.0)
 	add_child(burst)
+	_spawn_destroy_flash(pos, color, 0.42 * size_factor)
+	_spawn_shockwave_ring(pos, color, 1.05 * size_factor, DESTROY_RING_TIME * clampf(sqrt(size_factor), 1.0, 1.5))
 	var fade := create_tween()
 	var fade_duration := 0.76 * clampf(sqrt(size_factor), 0.85, 1.45)
 	fade.parallel().tween_property(shard_mat, "albedo_color", Color(color.r, color.g, color.b, 0.0), fade_duration)
@@ -3670,6 +3686,49 @@ func _spawn_enemy_destroy_effect(pos: Vector2, color: Color, radius: float, acce
 	fade.parallel().tween_property(accent_shard_mat, "albedo_color", Color(accent_color.r, accent_color.g, accent_color.b, 0.0), fade_duration)
 	fade.parallel().tween_property(accent_plate_mat, "albedo_color", Color(accent_color.r, accent_color.g, accent_color.b, 0.0), fade_duration)
 	fade.tween_callback(burst.queue_free)
+
+
+func _spawn_destroy_flash(pos: Vector2, color: Color, radius: float) -> void:
+	# A 45-degree plate that pops white-hot for a few frames, then cools into the burst colour.
+	var flash := MeshInstance3D.new()
+	flash.name = "DestroyFlash"
+	flash.mesh = _unit_box_mesh()
+	flash.position = _to_world(pos, 0.46)
+	flash.rotation.y = PI * 0.25
+	flash.scale = Vector3(radius * 0.5, 0.006, radius * 0.5)
+	var hot := color.lerp(Color.WHITE, 0.75)
+	var material := VisualMaterialsUtil.outline(hot, 0.80, 2.0)
+	flash.material_override = material
+	add_child(flash)
+	var tween := create_tween()
+	tween.parallel().tween_property(flash, "scale", Vector3(radius * 1.15, 0.006, radius * 1.15), DESTROY_FLASH_TIME).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_method(func(t: float) -> void: material.set_shader_parameter("line_color", Color(hot.lerp(color, t), 0.80 * (1.0 - t))), 0.0, 1.0, DESTROY_FLASH_TIME)
+	tween.tween_callback(flash.queue_free)
+
+
+func _spawn_shockwave_ring(pos: Vector2, color: Color, radius: float, duration: float, delay := 0.0) -> void:
+	# A hairline ring that races outward and thins as it fades, like the boss rings' rims.
+	# The unit ring is scaled up to radius, so its band is pre-thinned to land at DESTROY_RING_WIDTH.
+	var ring := MeshInstance3D.new()
+	ring.name = "ShockwaveRing"
+	var key := int(round(radius * 20.0))
+	if not shockwave_ring_meshes.has(key):
+		shockwave_ring_meshes[key] = _boss_core_ring_mesh(1.0, DESTROY_RING_WIDTH / maxf(0.1, radius), Color.WHITE, 0.0, 1.0).mesh
+	ring.mesh = shockwave_ring_meshes[key]
+	ring.material_override = VisualMaterialsUtil.outline(color.lerp(Color.WHITE, 0.35), 0.0, 1.6)
+	ring.position = _to_world(pos, 0.40)
+	ring.rotation = Vector3(randf_range(-SHOCKWAVE_MAX_TILT, SHOCKWAVE_MAX_TILT), randf() * TAU, randf_range(-SHOCKWAVE_MAX_TILT, SHOCKWAVE_MAX_TILT))
+	ring.scale = Vector3.ONE * radius * 0.12
+	var material := ring.material_override as ShaderMaterial
+	var line_color := color.lerp(Color.WHITE, 0.35)
+	add_child(ring)
+	var tween := create_tween()
+	if delay > 0.0:
+		tween.tween_interval(delay)
+	tween.tween_callback(func() -> void: material.set_shader_parameter("line_color", Color(line_color, 0.85)))
+	tween.parallel().tween_property(ring, "scale", Vector3(radius, 1.0, radius), duration).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_method(func(t: float) -> void: material.set_shader_parameter("line_color", Color(line_color, 0.85 * (1.0 - t) * (1.0 - t))), 0.0, 1.0, duration)
+	tween.tween_callback(ring.queue_free)
 
 
 func _spawn_player_shot_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.RIGHT) -> Node3D:
@@ -3700,8 +3759,15 @@ func _spawn_bullet_break_effect(pos: Vector2, color: Color, drift_direction := V
 	var target_distance := randf_range(0.46, 0.78)
 	plate.set_meta("target_distance", target_distance)
 	var duration := randf_range(0.22, 0.34)
+	var frame := Engine.get_process_frames()
+	if frame != bullet_break_ring_frame:
+		bullet_break_ring_frame = frame
+		bullet_break_rings_this_frame = 0
+	if bullet_break_rings_this_frame < BULLET_BREAK_RINGS_PER_FRAME:
+		bullet_break_rings_this_frame += 1
+		_spawn_shockwave_ring(pos, color, 0.55, 0.22)
 	var tween := create_tween()
-	tween.parallel().tween_property(plate, "position", _to_world(direction * target_distance, randf_range(-0.08, 0.14)), duration)
+	tween.parallel().tween_property(plate, "position", _to_world(direction * target_distance, randf_range(-0.08, 0.14)), duration).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	tween.parallel().tween_property(plate, "rotation", plate.rotation + Vector3(randf_range(-1.8, 1.8), randf_range(1.4, 3.0), randf_range(-1.8, 1.8)), duration)
 	tween.parallel().tween_property(plate, "scale", Vector3.ONE * randf_range(0.22, 0.46), duration)
 	tween.parallel().tween_property(material, "albedo_color", Color(color.r, color.g, color.b, 0.0), duration)
@@ -3759,7 +3825,7 @@ func _spawn_hit_effect(pos: Vector2, color: Color, impact_direction := Vector2.R
 		flash.add_child(tip)
 	add_child(flash)
 	var tween := create_tween()
-	tween.parallel().tween_property(flash, "scale", Vector3.ONE * randf_range(1.35, 2.05) * travel_scale, randf_range(0.14, 0.22))
+	tween.parallel().tween_property(flash, "scale", Vector3.ONE * randf_range(1.35, 2.05) * travel_scale, randf_range(0.14, 0.22)).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	tween.parallel().tween_property(flash, "rotation", flash.rotation + Vector3(0.0, randf_range(-0.18, 0.18), 0.0), 0.20)
 	tween.parallel().tween_property(tail_mat, "albedo_color", Color(spark_color.r, spark_color.g, spark_color.b, 0.0), randf_range(0.14, 0.22))
 	tween.parallel().tween_property(tip_mat, "albedo_color", Color(spark_color.r, spark_color.g, spark_color.b, 0.0), randf_range(0.14, 0.22))
@@ -4049,7 +4115,7 @@ func _spawn_player_burst(pos: Vector2) -> void:
 		var target_distance := randf_range(3.20, 5.10)
 		shard.set_meta("target_distance", target_distance)
 		var tween := create_tween()
-		tween.parallel().tween_property(shard, "position", _to_world(dir * target_distance, randf_range(0.08, 0.34)), 0.52)
+		tween.parallel().tween_property(shard, "position", _to_world(dir * target_distance, randf_range(0.08, 0.34)), 0.52).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		tween.parallel().tween_property(shard, "rotation", shard.rotation + Vector3(randf_range(-3.0, 3.0), randf_range(3.2, 6.4), randf_range(-3.0, 3.0)), 0.52)
 		tween.parallel().tween_property(shard, "scale", Vector3(1.85, 0.16, 1.85), 0.52)
 	for i in range(8):
@@ -4068,11 +4134,14 @@ func _spawn_player_burst(pos: Vector2) -> void:
 		var target_distance := randf_range(2.70, 4.40)
 		chunk.set_meta("target_distance", target_distance)
 		var tween := create_tween()
-		tween.parallel().tween_property(chunk, "position", _to_world(dir * target_distance, randf_range(0.12, 0.42)), 0.50)
+		tween.parallel().tween_property(chunk, "position", _to_world(dir * target_distance, randf_range(0.12, 0.42)), 0.50).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 		tween.parallel().tween_property(chunk, "rotation", chunk.rotation + Vector3(randf_range(-4.0, 4.0), randf_range(4.0, 7.2), randf_range(-4.0, 4.0)), 0.50)
 		tween.parallel().tween_property(chunk, "scale", Vector3(0.32, 0.32, 0.32), 0.50)
 	burst.position = _to_world(pos, 0.0)
 	add_child(burst)
+	_spawn_destroy_flash(pos, palette.player_core, 0.9)
+	_spawn_shockwave_ring(pos, palette.player_core, 3.6, 0.46)
+	_spawn_shockwave_ring(pos, palette.player, 2.2, 0.36, 0.06)
 	var fade := create_tween()
 	fade.parallel().tween_property(plate_mat, "albedo_color", Color(palette.player_core.r, palette.player_core.g, palette.player_core.b, 0.0), 0.52)
 	fade.parallel().tween_property(chunk_mat, "albedo_color", Color(palette.player.r, palette.player.g, palette.player.b, 0.0), 0.50)
