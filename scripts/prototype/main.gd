@@ -252,6 +252,8 @@ const TITLE_STRIP_BACKDROP := Color(0.32, 0.32, 0.33)
 const STRIP_REVEAL_SHADER := preload("res://assets/shaders/strip_reveal.gdshader")
 const RESULT_REVEAL_DELAY := 0.35
 const RESULT_REVEAL_TIME := 0.70
+const TITLE_LOGO_REVEAL_DELAY := 0.12
+const TITLE_LOGO_BOOT_DELAY := 0.30
 # Game over: the field slows almost to a standstill instead of carrying on at full speed.
 const GAME_OVER_SLOW_TIME := 1.4
 const GAME_OVER_REST_SCALE := 0.10
@@ -364,6 +366,7 @@ var game_over_age := 0.0
 var tunnel_surge := 1.0
 var pressure_time_scale := 1.0
 var title_divider: ColorRect
+var title_logo: TextureRect
 var title_strips: Array[ColorRect] = []
 var title_strip_tween: Tween
 var title_strip_hidden_children: Array[Node] = []
@@ -404,6 +407,7 @@ func _ready() -> void:
 	_setup_hud()
 	_setup_bullet_time_glitch()
 	_setup_title()
+	_play_logo_reveal(TITLE_LOGO_BOOT_DELAY)
 	_setup_model_gallery()
 	_setup_game_over()
 	_setup_arcade_clear()
@@ -1316,8 +1320,12 @@ func _setup_title() -> void:
 	title_layer.add_child(divider)
 
 	var title := TextureRect.new()
+	title_logo = title
 	title.name = "TitleLogo"
 	title.texture = TITLE_ATLAS
+	var logo_reveal := ShaderMaterial.new()
+	logo_reveal.shader = STRIP_REVEAL_SHADER
+	title.material = logo_reveal
 	title.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	# The logo is enlarged across the viewport; linear filtering keeps the V-shaped diagonals clean.
@@ -1554,6 +1562,15 @@ func _set_game_over_visible(value: bool) -> void:
 			_play_result_reveal(game_over_layer)
 
 
+func _play_logo_reveal(delay: float) -> void:
+	if title_logo == null:
+		return
+	var material := title_logo.material as ShaderMaterial
+	material.set_shader_parameter("progress", -delay)
+	var tween := create_tween()
+	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -delay, RESULT_REVEAL_TIME, delay + RESULT_REVEAL_TIME)
+
+
 # The result word slides in as vertical strips, echoing the title band's motion.
 func _play_result_reveal(layer: CanvasLayer) -> void:
 	var label := layer.get_child(0) as TextureRect
@@ -1679,6 +1696,7 @@ func _play_title_strips(entering_title: bool) -> void:
 		# The divider belongs to the band; it shows only once the strips have landed.
 		title_band.visible = false
 		title_divider.visible = false
+		_play_logo_reveal(TITLE_LOGO_REVEAL_DELAY)
 	else:
 		# The title layer was just hidden; bring it back holding only the strips.
 		title_layer.visible = true
@@ -1880,6 +1898,8 @@ func _reset_runtime_state() -> void:
 	boss_gum_controller.reset()
 	_clear_enemies()
 	_clear_bullets()
+	# The ship gathers in with the same converging squares as a respawn while the band strips leave.
+	_spawn_player_respawn_effect(player.pos)
 
 
 func _reset_gum() -> void:
