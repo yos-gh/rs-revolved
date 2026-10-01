@@ -254,6 +254,8 @@ const RESULT_REVEAL_DELAY := 0.35
 const RESULT_REVEAL_TIME := 0.70
 const TITLE_LOGO_REVEAL_DELAY := 0.12
 const TITLE_LOGO_BOOT_DELAY := 0.30
+# Strip exits run on the shader's exit_stagger/exit_duration defaults: 11 * 0.015 + 0.18.
+const STRIP_EXIT_TIME := 0.35
 # Game over: the field slows almost to a standstill instead of carrying on at full speed.
 const GAME_OVER_SLOW_TIME := 1.4
 const GAME_OVER_REST_SCALE := 0.10
@@ -1566,9 +1568,27 @@ func _play_logo_reveal(delay: float) -> void:
 	if title_logo == null:
 		return
 	var material := title_logo.material as ShaderMaterial
+	material.set_shader_parameter("exit_progress", -1.0)
 	material.set_shader_parameter("progress", -delay)
 	var tween := create_tween()
 	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -delay, RESULT_REVEAL_TIME, delay + RESULT_REVEAL_TIME)
+
+
+func _play_strip_exit(material: ShaderMaterial) -> Tween:
+	material.set_shader_parameter("exit_progress", 0.0)
+	var tween := create_tween()
+	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("exit_progress", value), 0.0, STRIP_EXIT_TIME, STRIP_EXIT_TIME)
+	return tween
+
+
+func _play_result_exit(layer: CanvasLayer) -> void:
+	# The layer was just hidden by the return to the title; keep it up until its strips are gone.
+	var label := layer.get_child(0) as TextureRect
+	var material := label.material as ShaderMaterial
+	if material == null:
+		return
+	layer.visible = true
+	_play_strip_exit(material).tween_callback(func() -> void: layer.visible = false)
 
 
 # The result word slides in as vertical strips, echoing the title band's motion.
@@ -1577,6 +1597,7 @@ func _play_result_reveal(layer: CanvasLayer) -> void:
 	var material := label.material as ShaderMaterial
 	if material == null:
 		return
+	material.set_shader_parameter("exit_progress", -1.0)
 	material.set_shader_parameter("progress", -RESULT_REVEAL_DELAY)
 	var tween := create_tween()
 	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -RESULT_REVEAL_DELAY, RESULT_REVEAL_TIME, RESULT_REVEAL_DELAY + RESULT_REVEAL_TIME)
@@ -1681,11 +1702,21 @@ func _fade_to(change: Callable) -> void:
 	if title_strip_tween != null and title_strip_tween.is_valid():
 		return
 	var entering_title := game_state.game_started
+	var result_layer: CanvasLayer = null
+	if game_state.game_over:
+		result_layer = game_over_layer
+	elif game_state.arcade_cleared:
+		result_layer = arcade_clear_layer
 	change.call()
-	_play_title_strips(entering_title)
+	var logo_delay := TITLE_LOGO_REVEAL_DELAY
+	if result_layer != null:
+		# The result word leaves first so the incoming logo never crosses it.
+		_play_result_exit(result_layer)
+		logo_delay = STRIP_EXIT_TIME + 0.05
+	_play_title_strips(entering_title, logo_delay)
 
 
-func _play_title_strips(entering_title: bool) -> void:
+func _play_title_strips(entering_title: bool, logo_delay := TITLE_LOGO_REVEAL_DELAY) -> void:
 	if title_strip_root == null:
 		return
 	var band_width: float = get_viewport().get_visible_rect().size.x * TITLE_DIVIDER_RATIO
@@ -1696,12 +1727,14 @@ func _play_title_strips(entering_title: bool) -> void:
 		# The divider belongs to the band; it shows only once the strips have landed.
 		title_band.visible = false
 		title_divider.visible = false
-		_play_logo_reveal(TITLE_LOGO_REVEAL_DELAY)
+		_play_logo_reveal(logo_delay)
 	else:
 		# The title layer was just hidden; bring it back holding only the strips.
 		title_layer.visible = true
+		# The logo stays to slide its strips out to the right alongside the band.
+		_play_strip_exit(title_logo.material as ShaderMaterial)
 		for child in title_layer.get_children():
-			if child != title_strip_root and child.visible:
+			if child != title_strip_root and child != title_logo and child.visible:
 				title_strip_hidden_children.append(child)
 				child.visible = false
 	title_strip_root.visible = true
@@ -1718,6 +1751,7 @@ func _play_title_strips(entering_title: bool) -> void:
 		else:
 			strip.position.x = home
 			title_strip_tween.tween_property(strip, "position:x", away, TITLE_STRIP_TIME).set_delay(delay).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	title_strip_tween.chain().tween_interval(maxf(0.0, STRIP_EXIT_TIME - TITLE_STRIP_TIME - float(TITLE_STRIP_COUNT - 1) * TITLE_STRIP_STAGGER))
 	title_strip_tween.chain().tween_callback(_finish_title_strips.bind(entering_title))
 
 
