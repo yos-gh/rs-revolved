@@ -263,6 +263,12 @@ const GAME_OVER_REST_SCALE := 0.10
 const CLEAR_TUNNEL_SURGE := 5.0
 const CLEAR_TUNNEL_SURGE_IN := 0.35
 const CLEAR_TUNNEL_SURGE_OUT := 1.8
+# Life and death: a strong glitch while the ship enters, dropping away as enemies arrive,
+# and one that creeps in a beat after the GAMEOVER word. Neither darkens the screen.
+const ENTRY_GLITCH := 0.95
+const GAME_OVER_GLITCH := 0.75
+const GAME_OVER_GLITCH_DELAY := 0.9
+const GAME_OVER_GLITCH_RISE := 2.2
 const MENU_ROW_HEIGHT := 14
 const UI_SVG_SCALE := 4.0
 const TITLE_VOID_SIDE_CROP := 4
@@ -365,6 +371,8 @@ var title_accept_blocked_by_fullscreen := false
 var title_strip_root: Control
 var boss_defeat_slow := 0.0
 var game_over_age := 0.0
+var entry_glitch := 0.0
+var death_focus := Vector2.ZERO
 var tunnel_surge := 1.0
 var pressure_time_scale := 1.0
 var title_divider: ColorRect
@@ -1911,6 +1919,7 @@ func _play_clear_tunnel_surge() -> void:
 
 func _show_game_over() -> void:
 	game_over_age = 0.0
+	death_focus = player.pos
 	game_state.enter_game_over()
 	bgm.stop()
 	_set_game_over_visible(true)
@@ -1934,6 +1943,9 @@ func _reset_runtime_state() -> void:
 	_clear_bullets()
 	# The ship gathers in with the same converging squares as a respawn while the band strips leave.
 	_spawn_player_respawn_effect(player.pos)
+	entry_glitch = ENTRY_GLITCH
+	if bullet_time_glitch != null:
+		bullet_time_glitch.intensity = ENTRY_GLITCH
 
 
 func _reset_gum() -> void:
@@ -2321,8 +2333,27 @@ func _update_bullet_time_glitch(delta: float) -> void:
 	if active:
 		intensity = TimingUtil.bullet_time_intensity(pressure_time_scale)
 	var screen_pos := camera.unproject_position(_to_world(player.pos, 0.32)) if active else Vector2.ZERO
-	bullet_time_glitch.update_effect(delta, screen_pos, intensity, bgm.beat_position(), bgm.beat_seconds())
-	time_warp_audio.update_effect(bullet_time_glitch.intensity)
+	var life_glitch := _update_life_glitch(delta)
+	if game_state.game_started and game_state.game_over:
+		screen_pos = camera.unproject_position(_to_world(death_focus, 0.32))
+	var total := maxf(intensity, life_glitch)
+	var darken := intensity / total if total > 0.001 else 1.0
+	bullet_time_glitch.update_effect(delta, screen_pos, total, bgm.beat_position(), bgm.beat_seconds(), darken, life_glitch)
+	# Only the bullet-time share bends the music; the life/death glitch stays silent.
+	time_warp_audio.update_effect(bullet_time_glitch.intensity * darken)
+
+
+func _update_life_glitch(delta: float) -> float:
+	if not game_state.game_started or game_state.arcade_cleared:
+		entry_glitch = 0.0
+		return 0.0
+	if game_state.game_over:
+		entry_glitch = 0.0
+		return GAME_OVER_GLITCH * smoothstep(GAME_OVER_GLITCH_DELAY, GAME_OVER_GLITCH_DELAY + GAME_OVER_GLITCH_RISE, game_over_age)
+	if entry_glitch > 0.0:
+		# Fades with the ship's grow-in and is gone the moment the ship reaches full size.
+		entry_glitch = ENTRY_GLITCH * clampf(player_spawn_effect_timer / SPAWN_EFFECT_TIME, 0.0, 1.0)
+	return entry_glitch
 
 
 func _update_debug_collisions() -> void:

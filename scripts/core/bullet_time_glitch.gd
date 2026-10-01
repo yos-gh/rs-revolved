@@ -48,7 +48,7 @@ func _ready() -> void:
 
 # `beat_position` is the BGM position in beats (negative when no music is playing) and
 # `beat_seconds` its beat length, so pulses land on the soundtrack's own tempo.
-func update_effect(delta: float, player_pos: Vector2, target_intensity: float, beat_position := -1.0, beat_seconds := FALLBACK_BEAT_SECONDS) -> void:
+func update_effect(delta: float, player_pos: Vector2, target_intensity: float, beat_position := -1.0, beat_seconds := FALLBACK_BEAT_SECONDS, darken := 1.0, chaos := 0.0) -> void:
 	_sync_viewport_rect()
 	player_screen_pos = player_pos
 	intensity = lerpf(intensity, clampf(target_intensity, 0.0, 1.0), minf(1.0, delta * 8.0))
@@ -58,6 +58,8 @@ func update_effect(delta: float, player_pos: Vector2, target_intensity: float, b
 	if not visible:
 		return
 	_post_material.set_shader_parameter("intensity", intensity)
+	_post_material.set_shader_parameter("darken", darken)
+	_post_material.set_shader_parameter("chaos", chaos)
 	_post_material.set_shader_parameter("time", _time)
 	_post_material.set_shader_parameter("canvas_size", size)
 	_post_material.set_shader_parameter("focus_px", player_screen_pos)

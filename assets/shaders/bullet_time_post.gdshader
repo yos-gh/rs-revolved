@@ -18,6 +18,11 @@ uniform float clear_radius = 0.12;
 uniform float soft_radius = 0.26;
 uniform float shift_clear_radius = 0.20;
 uniform float shift_soft_radius = 0.30;
+// 1 for bullet time; 0 keeps the glitch but drops the grading and vignette that darken
+// the screen (used for the life/death glitch at game start and game over).
+uniform float darken = 1.0;
+// Extra tearing for the life/death glitch: more and wider slices, more and bigger blocks.
+uniform float chaos = 0.0;
 
 const int ZOOM_TAPS = 5;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -54,6 +59,10 @@ void fragment() {
 	vec2 dir_uv = dist > 1e-4 ? normalize((local_px - focus_px) * uv_per_px) : vec2(0.0);
 	float periph = smoothstep(clear_radius, clear_radius + soft_radius, dist);
 	float shift_mask = smoothstep(shift_clear_radius, shift_clear_radius + shift_soft_radius, dist);
+	// The life/death glitch covers the whole screen; only bullet time spares the ship.
+	float open_field = clamp(chaos * 4.0, 0.0, 1.0);
+	periph = mix(periph, 1.0, open_field);
+	shift_mask = mix(shift_mask, 1.0, open_field);
 	float amt = intensity * periph;
 	float shift_amt = intensity * shift_mask;
 	vec2 screen_n = local_px / canvas_size;
@@ -71,8 +80,8 @@ void fragment() {
 	// Slice displacement: horizontal bands tear sideways, mostly during beat bursts.
 	float band_h = mix(0.010, 0.06, hash11(st * 0.37 + 1.0));
 	float band_id = floor((screen_n.y + hash11(st) * 0.5) / band_h);
-	float slice_on = step(1.0 - (0.02 + 0.22 * burst) * intensity, hash21(vec2(band_id, st)));
-	float slice_shift = (hash21(vec2(band_id, st + 7.0)) - 0.5) * (0.010 + 0.07 * burst) * slice_on * shift_mask;
+	float slice_on = step(1.0 - (0.02 + 0.22 * burst) * intensity - 0.30 * chaos, hash21(vec2(band_id, st)));
+	float slice_shift = (hash21(vec2(band_id, st + 7.0)) - 0.5) * (0.010 + 0.07 * burst + 0.16 * chaos) * slice_on * shift_mask;
 	uv.x += slice_shift;
 
 	// Smear streaks: a segment of a band is stretched from its left edge like a pixel-sort
@@ -87,11 +96,12 @@ void fragment() {
 	uv.x = mix(uv.x, uv.x - (screen_n.x - seg_start) * 0.94 * canvas_size.x * uv_per_px.x, smear_on);
 
 	// Block corruption: sparse coarse cells pixelate and sample from a neighbouring region.
-	vec2 bsize = vec2(mix(28.0, 96.0, hash11(st + 3.0)), mix(10.0, 36.0, hash11(st + 5.0)));
+	vec2 bsize = vec2(mix(28.0, 96.0, hash11(st + 3.0)), mix(10.0, 36.0, hash11(st + 5.0))) * (1.0 + 1.6 * chaos);
 	vec2 bid = floor(local_px / bsize);
-	float block_on = step(1.0 - (0.022 + 0.09 * burst) * intensity, hash21(bid + st * 1.37)) * step(0.5, shift_mask);
-	vec2 block_off = (vec2(hash21(bid + st), hash21(bid - st)) - 0.5) * vec2(0.06, 0.02);
-	vec2 cell_uv = SCREEN_UV + ((floor(local_px / 6.0) * 6.0 + 3.0) - local_px) * uv_per_px + block_off;
+	float block_on = step(1.0 - (0.022 + 0.09 * burst) * intensity - 0.20 * chaos, hash21(bid + st * 1.37)) * step(0.5, shift_mask);
+	vec2 block_off = (vec2(hash21(bid + st), hash21(bid - st)) - 0.5) * vec2(0.06, 0.02) * (1.0 + 2.0 * chaos);
+	float cell_px = 6.0 + 10.0 * chaos;
+	vec2 cell_uv = SCREEN_UV + ((floor(local_px / cell_px) * cell_px + cell_px * 0.5) - local_px) * uv_per_px + block_off;
 	uv = mix(uv, cell_uv, block_on);
 
 	// Radial zoom blur toward the player plus spectral chromatic aberration.
@@ -116,11 +126,11 @@ void fragment() {
 	vec3 duo = mix(SHADOW_TINT, HIGHLIGHT_TINT, smoothstep(0.02, 0.85, lum));
 	vec3 graded = mix(col, duo * (0.4 + lum * 0.9), 0.30 * edge);
 	graded = (graded - 0.5) * (1.0 + 0.12 * intensity) + 0.5;
-	col = mix(col, graded, amt);
+	col = mix(col, graded, amt * darken);
 
 	// Vignette that breathes with the beat.
 	float vig = smoothstep(0.35, 1.05, length((screen_n - 0.5) * vec2(canvas_size.x / canvas_size.y, 1.0)) * 1.2);
-	col *= 1.0 - vig * (0.34 + 0.08 * beat_env) * intensity;
+	col *= 1.0 - vig * (0.34 + 0.08 * beat_env) * intensity * darken;
 
 	// Scanlines, analog line noise and chroma grain.
 	float scan = 0.5 + 0.5 * sin(local_px.y * 3.14159);
