@@ -84,6 +84,13 @@ const BOSS_ENTRANCE_REACH_DELAY := 0.25
 const BOSS_ENTRANCE_REACH_TIME := 0.45
 const BOSS_ENTRANCE_TURRET_STAGGER := 0.10
 const BOSS_ENTRANCE_TURRET_TIME := 0.25
+# Boss defeat: a short slowdown, then the surviving turrets' tentacles crumble from the core
+# outward and each turret goes up as its tentacle burns out, one after another.
+const BOSS_DEFEAT_SLOW_TIME := 0.55
+const BOSS_DEFEAT_SLOW_SCALE := 0.22
+const BOSS_DEFEAT_CRUMBLE_DELAY := 0.18
+const BOSS_DEFEAT_CRUMBLE_TIME := 0.32
+const BOSS_DEFEAT_CRUMBLE_STAGGER := 0.16
 # Turret bodies: fainter fills and firmer outlines so stacked boxes read as one machine.
 const BOSS_TURRET_FACE_ALPHA_SCALE := 0.62
 const BOSS_TURRET_EDGE_ALPHA := 0.38
@@ -342,6 +349,8 @@ var title_void_revealed := false
 var title_void_noise_timer := 0.0
 var title_accept_blocked_by_fullscreen := false
 var title_strip_root: Control
+var boss_defeat_slow := 0.0
+var pressure_time_scale := 1.0
 var title_divider: ColorRect
 var title_strips: Array[ColorRect] = []
 var title_strip_tween: Tween
@@ -1700,6 +1709,7 @@ func _update_arcade_clear() -> void:
 
 func _update_arcade_clear_scene(delta: float) -> void:
 	game_time_scale = move_toward(game_time_scale, 1.0, delta * 2.0)
+	pressure_time_scale = game_time_scale
 	_update_bullet_time_glitch(delta)
 	player.update_motion(delta, FIELD_W, FIELD_H, FIELD_EDGE_MARGIN)
 	_refresh_gamepad_aim_anchor()
@@ -1720,6 +1730,7 @@ func _update_game_over() -> void:
 
 func _update_game_over_scene(delta: float) -> void:
 	game_time_scale = move_toward(game_time_scale, 1.0, delta * 2.0)
+	pressure_time_scale = game_time_scale
 	_update_bullet_time_glitch(delta)
 	bullet_manager.update_bullets(delta, FIELD_W, FIELD_H, DESPAWN_MARGIN, false, _player_hit_axis(), enemies)
 	_update_enemies(delta)
@@ -2007,6 +2018,7 @@ func _update_enemies(delta: float) -> void:
 			_kill_player()
 		if enemy.kind == "boss_core" and enemy.life <= 0:
 			boss_defeated = true
+			boss_defeat_slow = 1.0
 			_play_boss_core_destroy_sfx()
 			_spawn_boss_destroy_effect(enemy.pos, enemy.color, enemy.node as Node3D)
 			_free_enemy_nodes(enemy)
@@ -2129,7 +2141,13 @@ func _debug_profile_summary() -> String:
 func _update_game_timing(delta: float) -> void:
 	object_pressure = TimingUtil.compute_object_pressure(bullet_manager.count(), enemies.size(), game_state.boss_mode)
 	var target_time_scale := TimingUtil.compute_time_scale(object_pressure)
-	game_time_scale = TimingUtil.approach_time_scale(game_time_scale, target_time_scale, delta)
+	# Bullet-time visuals and audio follow crowd pressure only; the boss-defeat slowdown
+	# is layered on top of it for the simulation alone.
+	pressure_time_scale = TimingUtil.approach_time_scale(pressure_time_scale, target_time_scale, delta)
+	game_time_scale = pressure_time_scale
+	if boss_defeat_slow > 0.0:
+		boss_defeat_slow = maxf(0.0, boss_defeat_slow - delta / BOSS_DEFEAT_SLOW_TIME)
+		game_time_scale = minf(game_time_scale, lerpf(1.0, BOSS_DEFEAT_SLOW_SCALE, smoothstep(0.0, 1.0, boss_defeat_slow)))
 
 
 func _update_debug_profile(delta: float) -> void:
@@ -2205,7 +2223,7 @@ func _update_bullet_time_glitch(delta: float) -> void:
 	var active := game_state.game_started and not game_state.arcade_cleared and player.alive
 	var intensity := 0.0
 	if active:
-		intensity = TimingUtil.bullet_time_intensity(game_time_scale)
+		intensity = TimingUtil.bullet_time_intensity(pressure_time_scale)
 	var screen_pos := camera.unproject_position(_to_world(player.pos, 0.32)) if active else Vector2.ZERO
 	bullet_time_glitch.update_effect(delta, screen_pos, intensity, bgm.beat_position(), bgm.beat_seconds())
 	time_warp_audio.update_effect(bullet_time_glitch.intensity)
@@ -2728,7 +2746,7 @@ func _play_boss_entrance() -> void:
 			var line := enemy.get("connection_line") as Node3D
 			if line != null:
 				line.set_meta("connection_grow", 0.0)
-				tween.tween_method(func(value: float) -> void: line.set_meta("connection_grow", value), 0.0, 1.0, BOSS_ENTRANCE_REACH_TIME).set_delay(reach_delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+				tween.tween_method(_set_connection_grow.bind(line), 0.0, 1.0, BOSS_ENTRANCE_REACH_TIME).set_delay(reach_delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 			node.scale = Vector3.ONE * 0.001
 			tween.tween_property(node, "scale", Vector3.ONE, BOSS_ENTRANCE_TURRET_TIME).set_delay(reach_delay + BOSS_ENTRANCE_REACH_TIME * 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			turret_index += 1
@@ -2786,14 +2804,54 @@ func _end_boss_mode() -> void:
 
 
 func _award_remaining_boss_turret_scores() -> void:
+	var turret_index := 0
 	for enemy in enemies:
 		if not String(enemy.get("kind", "")).begins_with("boss_turret") or int(enemy.get("life", 0)) <= 0:
 			continue
 		enemy.life = 0
 		var score_base := int(enemy.get("score_base", 0))
 		game_state.add_enemy_score(score_base, false, GameStateUtil.minimum_score_for_base(score_base))
-		sfx.play("bomb_m")
-		_spawn_enemy_destroy_effect(enemy.pos, palette.boss_core, enemy.radius, enemy.color, 0.20)
+		_play_turret_remnant_collapse(enemy, turret_index)
+		turret_index += 1
+
+
+# Keeps a defeated boss's turret and tentacle on screen just long enough to crumble the
+# tentacle from the core outward, then blows the turret. The enemy entry itself is gone.
+func _play_turret_remnant_collapse(enemy: Dictionary, order: int) -> void:
+	var node := enemy.get("node") as Node3D
+	var line := enemy.get("connection_line") as Node3D
+	var pos: Vector2 = enemy.pos
+	var radius: float = enemy.radius
+	var color: Color = enemy.color
+	var core_pos: Vector2 = boss.center
+	enemy.node = null
+	enemy.connection_line = null
+	var tween := create_tween()
+	tween.tween_interval(BOSS_DEFEAT_CRUMBLE_DELAY + float(order) * BOSS_DEFEAT_CRUMBLE_STAGGER)
+	if line != null and is_instance_valid(line):
+		tween.tween_method(_crumble_remnant_line.bind(line, core_pos, pos), 0.0, 1.0, BOSS_DEFEAT_CRUMBLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.tween_callback(_detonate_turret_remnant.bind(node, line, pos, radius, color))
+
+
+func _set_connection_grow(value: float, line: Node3D) -> void:
+	if is_instance_valid(line):
+		line.set_meta("connection_grow", value)
+
+
+func _crumble_remnant_line(value: float, line: Node3D, core_pos: Vector2, pos: Vector2) -> void:
+	if not is_instance_valid(line):
+		return
+	line.set_meta("connection_cut", value)
+	boss._update_connection_line(line, core_pos, pos, 1.0 / 60.0)
+
+
+func _detonate_turret_remnant(node: Node3D, line: Node3D, pos: Vector2, radius: float, color: Color) -> void:
+	sfx.play("bomb_m")
+	_spawn_enemy_destroy_effect(pos, palette.boss_core, radius, color, 0.20)
+	if is_instance_valid(line):
+		line.queue_free()
+	if is_instance_valid(node):
+		node.queue_free()
 
 
 func _clear_enemies() -> void:

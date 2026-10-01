@@ -524,6 +524,14 @@ func _update_connection_line(line: Node3D, a: Vector2, b: Vector2, delta := 0.0)
 		points = points.slice(0, keep)
 		widths = widths.slice(0, keep)
 		sides = sides.slice(0, keep)
+	# After the core falls, each tentacle crumbles away from its root toward the turret.
+	var cut := clampf(float(line.get_meta("connection_cut", 0.0)), 0.0, 1.0)
+	if cut > 0.0:
+		var first := mini(points.size() - 2, floori(cut * float(points.size() - 1)))
+		points = points.slice(first)
+		widths = widths.slice(first)
+		sides = sides.slice(first)
+		grow = 0.0
 	var face := line.find_child("BossCoreConnectionRibbonMain", false, false) as MeshInstance3D
 	if face != null:
 		face.mesh = _tentacle_strip_mesh(points, sides, widths, -0.5, 0.5)
