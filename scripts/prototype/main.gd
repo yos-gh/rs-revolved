@@ -249,6 +249,16 @@ const TITLE_STRIP_COUNT := 12
 const TITLE_STRIP_TIME := 0.18
 const TITLE_STRIP_STAGGER := 0.014
 const TITLE_STRIP_BACKDROP := Color(0.32, 0.32, 0.33)
+const STRIP_REVEAL_SHADER := preload("res://assets/shaders/strip_reveal.gdshader")
+const RESULT_REVEAL_DELAY := 0.35
+const RESULT_REVEAL_TIME := 0.70
+# Game over: the field slows almost to a standstill instead of carrying on at full speed.
+const GAME_OVER_SLOW_TIME := 1.4
+const GAME_OVER_REST_SCALE := 0.10
+# All clear: the tunnel surges forward, then settles.
+const CLEAR_TUNNEL_SURGE := 5.0
+const CLEAR_TUNNEL_SURGE_IN := 0.35
+const CLEAR_TUNNEL_SURGE_OUT := 1.8
 const MENU_ROW_HEIGHT := 14
 const UI_SVG_SCALE := 4.0
 const TITLE_VOID_SIDE_CROP := 4
@@ -350,6 +360,8 @@ var title_void_noise_timer := 0.0
 var title_accept_blocked_by_fullscreen := false
 var title_strip_root: Control
 var boss_defeat_slow := 0.0
+var game_over_age := 0.0
+var tunnel_surge := 1.0
 var pressure_time_scale := 1.0
 var title_divider: ColorRect
 var title_strips: Array[ColorRect] = []
@@ -752,7 +764,7 @@ func _setup_scanlines() -> void:
 
 func _update_background_tunnel(delta: float) -> void:
 	_update_background_profile()
-	tunnel_time += delta * tunnel_speed
+	tunnel_time += delta * tunnel_speed * tunnel_surge
 	_update_background_light()
 	scanline_time += delta * (0.10 + tunnel_speed * 0.035)
 	_update_scanlines()
@@ -1518,7 +1530,11 @@ func _create_result_layer(layer_name: String, menu_row: int) -> CanvasLayer:
 	add_child(layer)
 	var result := TextureRect.new()
 	result.name = "%sLabel" % layer_name
-	result.texture = _menu_row_texture(menu_row)
+	# A standalone texture so the strip-reveal shader sees UVs spanning just this row.
+	result.texture = ImageTexture.create_from_image(_menu_row_texture(menu_row).get_image())
+	var reveal := ShaderMaterial.new()
+	reveal.shader = STRIP_REVEAL_SHADER
+	result.material = reveal
 	result.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	result.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	result.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
@@ -1534,11 +1550,27 @@ func _create_result_layer(layer_name: String, menu_row: int) -> CanvasLayer:
 func _set_game_over_visible(value: bool) -> void:
 	if game_over_layer != null:
 		game_over_layer.visible = value
+		if value:
+			_play_result_reveal(game_over_layer)
+
+
+# The result word slides in as vertical strips, echoing the title band's motion.
+func _play_result_reveal(layer: CanvasLayer) -> void:
+	var label := layer.get_child(0) as TextureRect
+	var material := label.material as ShaderMaterial
+	if material == null:
+		return
+	material.set_shader_parameter("progress", -RESULT_REVEAL_DELAY)
+	var tween := create_tween()
+	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -RESULT_REVEAL_DELAY, RESULT_REVEAL_TIME, RESULT_REVEAL_DELAY + RESULT_REVEAL_TIME)
 
 
 func _set_arcade_clear_visible(value: bool) -> void:
 	if arcade_clear_layer != null:
 		arcade_clear_layer.visible = value
+		if value:
+			_play_result_reveal(arcade_clear_layer)
+			_play_clear_tunnel_surge()
 	if value:
 		player.visible = true
 		gum_controller.visible = true
@@ -1729,13 +1761,15 @@ func _update_game_over() -> void:
 
 
 func _update_game_over_scene(delta: float) -> void:
-	game_time_scale = move_toward(game_time_scale, 1.0, delta * 2.0)
-	pressure_time_scale = game_time_scale
+	game_over_age += delta
+	game_time_scale = lerpf(1.0, GAME_OVER_REST_SCALE, smoothstep(0.0, GAME_OVER_SLOW_TIME, game_over_age))
+	pressure_time_scale = 1.0
 	_update_bullet_time_glitch(delta)
-	bullet_manager.update_bullets(delta, FIELD_W, FIELD_H, DESPAWN_MARGIN, false, _player_hit_axis(), enemies)
-	_update_enemies(delta)
-	_update_boss_gum_attack(delta, false)
-	_update_spawning(delta, false)
+	var sim_delta := delta * game_time_scale
+	bullet_manager.update_bullets(sim_delta, FIELD_W, FIELD_H, DESPAWN_MARGIN, false, _player_hit_axis(), enemies)
+	_update_enemies(sim_delta)
+	_update_boss_gum_attack(sim_delta, false)
+	_update_spawning(sim_delta, false)
 	_update_enemy_visual_batches()
 	bullet_manager.flush_visual_batches()
 	_update_debug_profile(delta)
@@ -1816,7 +1850,15 @@ func _kill_player() -> void:
 		call_deferred("_clear_bullets")
 
 
+func _play_clear_tunnel_surge() -> void:
+	tunnel_surge = 1.0
+	var tween := create_tween()
+	tween.tween_property(self, "tunnel_surge", CLEAR_TUNNEL_SURGE, CLEAR_TUNNEL_SURGE_IN).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "tunnel_surge", 1.0, CLEAR_TUNNEL_SURGE_OUT).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+
 func _show_game_over() -> void:
+	game_over_age = 0.0
 	game_state.enter_game_over()
 	bgm.stop()
 	_set_game_over_visible(true)
