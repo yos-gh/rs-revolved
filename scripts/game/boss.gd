@@ -517,6 +517,13 @@ func _update_connection_line(line: Node3D, a: Vector2, b: Vector2, delta := 0.0)
 	var points := _tentacle_points(a, b, seed, time, wave, float(line.get_meta("wave_scroll", 0.0)))
 	var widths := _tentacle_widths(points.size(), seed, time)
 	var sides := _tentacle_sides(points, seed, time)
+	# While the boss assembles, the tentacle reaches out from the core and only shows its grown part.
+	var grow := clampf(float(line.get_meta("connection_grow", 1.0)), 0.0, 1.0)
+	if grow < 1.0:
+		var keep := maxi(2, ceili(grow * float(points.size() - 1)) + 1)
+		points = points.slice(0, keep)
+		widths = widths.slice(0, keep)
+		sides = sides.slice(0, keep)
 	var face := line.find_child("BossCoreConnectionRibbonMain", false, false) as MeshInstance3D
 	if face != null:
 		face.mesh = _tentacle_strip_mesh(points, sides, widths, -0.5, 0.5)
@@ -525,7 +532,11 @@ func _update_connection_line(line: Node3D, a: Vector2, b: Vector2, delta := 0.0)
 		var rim_mesh := _tentacle_strip_mesh(points, sides, widths, 0.5 - TENTACLE_RIM_RATIO, 0.5)
 		_append_tentacle_strip(rim_mesh, points, sides, widths, -0.5, -0.5 + TENTACLE_RIM_RATIO)
 		rims.mesh = rim_mesh
-	_update_tentacle_pulses(line, points, a.distance_to(b), time)
+	if grow >= 1.0:
+		_update_tentacle_pulses(line, points, a.distance_to(b), time)
+	else:
+		for pulse in line.find_children("BossCoreConnectionPulse*", "Node3D", false, false):
+			(pulse as Node3D).scale = Vector3.ONE * 0.001
 
 
 func _advance_tentacle_wave(line: Node3D, delta: float) -> PackedFloat32Array:

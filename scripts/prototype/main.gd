@@ -76,6 +76,14 @@ const BOSS_RIBBON_EDGE_WIDTH := 0.010
 const BOSS_CONNECTION_PULSES := 3
 const BOSS_CORE_GEM_STRETCH := 1.45
 const BOSS_CORE_GEM_TILT := 0.55
+const BOSS_ENTRANCE_CORE_TIME := 0.40
+const BOSS_ENTRANCE_RING_DELAY := 0.12
+const BOSS_ENTRANCE_RING_STAGGER := 0.12
+const BOSS_ENTRANCE_RING_TIME := 0.40
+const BOSS_ENTRANCE_REACH_DELAY := 0.25
+const BOSS_ENTRANCE_REACH_TIME := 0.45
+const BOSS_ENTRANCE_TURRET_STAGGER := 0.10
+const BOSS_ENTRANCE_TURRET_TIME := 0.25
 # Turret bodies: fainter fills and firmer outlines so stacked boxes read as one machine.
 const BOSS_TURRET_FACE_ALPHA_SCALE := 0.62
 const BOSS_TURRET_EDGE_ALPHA := 0.38
@@ -1984,7 +1992,8 @@ func _update_enemies(delta: float) -> void:
 
 		_update_spawn_collision_state(enemy)
 		enemy.node.position = _to_world(enemy.pos, _enemy_visual_height(enemy.kind))
-		_apply_spawn_effect(enemy.node, enemy.age, 2.0, 0.35)
+		if not enemy.get("entrance_managed", false):
+			_apply_spawn_effect(enemy.node, enemy.age, 2.0, 0.35)
 		if not EnemyUtil.is_boss(enemy) and enemy.kind not in ["zakoM0", "zakoM1", "zako0", "zako1", "zako2", "zako3", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p"]:
 			enemy.node.rotation.y += delta * enemy.spin
 		if (
@@ -2692,6 +2701,37 @@ func _start_boss_mode() -> void:
 	var turret_kinds := _boss_turret_sequence()
 	for turret_kind in turret_kinds:
 		_spawn_boss_turret(turret_kind)
+	_play_boss_entrance()
+
+
+# The boss assembles instead of popping in: the core opens from a point, its rings unfold one
+# by one, tentacles reach out to each turret site and the turrets build up at their tips.
+func _play_boss_entrance() -> void:
+	var tween := create_tween().set_parallel(true)
+	var turret_index := 0
+	for enemy in enemies:
+		var node := enemy.get("node") as Node3D
+		if node == null or not EnemyUtil.is_boss(enemy):
+			continue
+		# The generic spawn grow-in would fight these tweens over the node scale.
+		enemy.entrance_managed = true
+		if enemy.kind == "boss_core":
+			node.scale = Vector3.ONE * 0.001
+			tween.tween_property(node, "scale", Vector3.ONE, BOSS_ENTRANCE_CORE_TIME).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			var ring_index := 0
+			for ring in node.find_children("boss-core-ring-*", "Node3D", true, false):
+				ring.scale = Vector3.ONE * 0.001
+				tween.tween_property(ring, "scale", Vector3.ONE, BOSS_ENTRANCE_RING_TIME).set_delay(BOSS_ENTRANCE_RING_DELAY + ring_index * BOSS_ENTRANCE_RING_STAGGER).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+				ring_index += 1
+		elif String(enemy.kind).begins_with("boss_turret"):
+			var reach_delay := BOSS_ENTRANCE_REACH_DELAY + turret_index * BOSS_ENTRANCE_TURRET_STAGGER
+			var line := enemy.get("connection_line") as Node3D
+			if line != null:
+				line.set_meta("connection_grow", 0.0)
+				tween.tween_method(func(value: float) -> void: line.set_meta("connection_grow", value), 0.0, 1.0, BOSS_ENTRANCE_REACH_TIME).set_delay(reach_delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+			node.scale = Vector3.ONE * 0.001
+			tween.tween_property(node, "scale", Vector3.ONE, BOSS_ENTRANCE_TURRET_TIME).set_delay(reach_delay + BOSS_ENTRANCE_REACH_TIME * 0.8).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			turret_index += 1
 
 
 func _set_arcade_rank(value: int) -> void:
