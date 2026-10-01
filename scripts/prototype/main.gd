@@ -230,6 +230,10 @@ const TITLE_REGULAR_MODE_COUNT := 4
 const TITLE_VOID_MODE_INDEX := 4
 const TITLE_VOID_MENU_ROW := 6
 const TITLE_DIVIDER_RATIO := 0.373
+const TITLE_STRIP_COUNT := 12
+const TITLE_STRIP_TIME := 0.18
+const TITLE_STRIP_STAGGER := 0.014
+const TITLE_STRIP_BACKDROP := Color(0.32, 0.32, 0.33)
 const MENU_ROW_HEIGHT := 14
 const UI_SVG_SCALE := 4.0
 const TITLE_VOID_SIDE_CROP := 4
@@ -329,6 +333,11 @@ var title_mode_index := 0
 var title_void_revealed := false
 var title_void_noise_timer := 0.0
 var title_accept_blocked_by_fullscreen := false
+var title_strip_root: Control
+var title_divider: ColorRect
+var title_strips: Array[ColorRect] = []
+var title_strip_tween: Tween
+var title_strip_hidden_children: Array[Node] = []
 var arcade_clear_layer: CanvasLayer
 var game_over_layer: CanvasLayer
 var bullet_time_glitch: Control
@@ -1248,7 +1257,25 @@ func _setup_title() -> void:
 	title_band.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_layer.add_child(title_band)
 
+	title_strip_root = Control.new()
+	title_strip_root.name = "TitleBandStrips"
+	title_strip_root.anchor_right = TITLE_DIVIDER_RATIO
+	title_strip_root.anchor_bottom = 1.0
+	title_strip_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_strip_root.visible = false
+	title_layer.add_child(title_strip_root)
+	title_strips.clear()
+	for index in range(TITLE_STRIP_COUNT):
+		var strip := ColorRect.new()
+		strip.anchor_left = float(index) / float(TITLE_STRIP_COUNT)
+		strip.anchor_right = float(index + 1) / float(TITLE_STRIP_COUNT)
+		strip.anchor_bottom = 1.0
+		strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_strip_root.add_child(strip)
+		title_strips.append(strip)
+
 	var divider := ColorRect.new()
+	title_divider = divider
 	divider.name = "TitleDivider"
 	divider.anchor_left = TITLE_DIVIDER_RATIO
 	divider.anchor_right = TITLE_DIVIDER_RATIO
@@ -1292,7 +1319,7 @@ func _setup_title() -> void:
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size = Vector2(340.0, 30.0)
-		button.pressed.connect(_start_title_mode.bind(index))
+		button.pressed.connect(_fade_to.bind(_start_title_mode.bind(index)))
 		menu_root.add_child(button)
 		title_menu_buttons.append(button)
 
@@ -1513,7 +1540,7 @@ func _update_title() -> void:
 	elif Input.is_action_just_pressed("move_down"):
 		_move_title_selection(1)
 	if _accept_just_pressed():
-		_start_selected_mode()
+		_fade_to(_start_selected_mode)
 
 
 func _move_title_selection(direction: int) -> void:
@@ -1582,6 +1609,70 @@ func _menu_row_texture(index: int, crop_side_bars := false) -> AtlasTexture:
 	return texture
 
 
+# Title <-> game switches: everything changes instantly except the title's pale left band,
+# which splits into vertical strips that shoot out to the left or slide back in.
+func _fade_to(change: Callable) -> void:
+	if title_strip_tween != null and title_strip_tween.is_valid():
+		return
+	var entering_title := game_state.game_started
+	change.call()
+	_play_title_strips(entering_title)
+
+
+func _play_title_strips(entering_title: bool) -> void:
+	if title_strip_root == null:
+		return
+	var band_width: float = get_viewport().get_visible_rect().size.x * TITLE_DIVIDER_RATIO
+	var strip_width := band_width / float(TITLE_STRIP_COUNT)
+	var strip_color := _title_band_composite_color()
+	title_strip_hidden_children.clear()
+	if entering_title:
+		# The divider belongs to the band; it shows only once the strips have landed.
+		title_band.visible = false
+		title_divider.visible = false
+	else:
+		# The title layer was just hidden; bring it back holding only the strips.
+		title_layer.visible = true
+		for child in title_layer.get_children():
+			if child != title_strip_root and child.visible:
+				title_strip_hidden_children.append(child)
+				child.visible = false
+	title_strip_root.visible = true
+	title_strip_tween = create_tween().set_parallel(true)
+	for index in range(TITLE_STRIP_COUNT):
+		var strip := title_strips[index]
+		strip.color = strip_color
+		var home := float(index) * strip_width
+		var away := -strip_width - 2.0
+		var delay := float(index) * TITLE_STRIP_STAGGER
+		if entering_title:
+			strip.position.x = away
+			title_strip_tween.tween_property(strip, "position:x", home, TITLE_STRIP_TIME).set_delay(delay).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		else:
+			strip.position.x = home
+			title_strip_tween.tween_property(strip, "position:x", away, TITLE_STRIP_TIME).set_delay(delay).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	title_strip_tween.chain().tween_callback(_finish_title_strips.bind(entering_title))
+
+
+func _finish_title_strips(entering_title: bool) -> void:
+	title_strip_root.visible = false
+	if entering_title:
+		title_band.visible = true
+		title_divider.visible = true
+	else:
+		for child in title_strip_hidden_children:
+			if is_instance_valid(child):
+				child.visible = true
+		title_strip_hidden_children.clear()
+		title_layer.visible = not game_state.game_started
+
+
+func _title_band_composite_color() -> Color:
+	# The band is translucent over the shade; strips must read the same while the shade is gone.
+	var under := TITLE_STRIP_BACKDROP.lerp(Color(title_shade.color, 1.0), title_shade.color.a)
+	return under.lerp(Color(title_band.color, 1.0), title_band.color.a)
+
+
 func _start_selected_mode() -> void:
 	_start_title_mode(title_mode_index)
 
@@ -1596,7 +1687,7 @@ func _start_title_mode(index: int) -> void:
 
 func _update_arcade_clear() -> void:
 	if _accept_just_pressed():
-		_return_to_title()
+		_fade_to(_return_to_title)
 
 
 func _update_arcade_clear_scene(delta: float) -> void:
@@ -1616,7 +1707,7 @@ func _update_arcade_clear_scene(delta: float) -> void:
 
 func _update_game_over() -> void:
 	if _accept_just_pressed():
-		_return_to_title()
+		_fade_to(_return_to_title)
 
 
 func _update_game_over_scene(delta: float) -> void:
@@ -1655,7 +1746,7 @@ func _handle_escape() -> void:
 	if not game_state.game_started:
 		get_tree().quit()
 		return
-	_return_to_title()
+	_fade_to(_return_to_title)
 
 
 func _return_to_title() -> void:
