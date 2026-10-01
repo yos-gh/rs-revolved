@@ -66,8 +66,21 @@ void fragment() {
 """
 const BOSS_CORE_GUN_ORBIT_RADIUS := 0.96
 const BOSS_CAGED_CORE_OUTLINE_WIDTH := 0.040
-const BOSS_CAGED_PRIMARY_RING_WIDTH := 0.032
-const BOSS_CAGED_SECONDARY_RING_WIDTH := 0.065
+# Orrery-style hoops: thin cylindrical ribbons whose heights differ on purpose.
+const BOSS_RIBBON_INNER_WIDTH := 0.05
+const BOSS_RIBBON_PRIMARY_WIDTH := 0.12
+const BOSS_RIBBON_SECONDARY_WIDTH := 0.24
+const BOSS_RIBBON_SEGMENTS := 96
+const BOSS_RIBBON_FACE_ALPHA_SCALE := 0.45
+const BOSS_RIBBON_EDGE_WIDTH := 0.010
+const BOSS_CONNECTION_PULSES := 3
+const BOSS_CORE_GEM_STRETCH := 1.45
+const BOSS_CORE_GEM_TILT := 0.55
+# Turret bodies: fainter fills and firmer outlines so stacked boxes read as one machine.
+const BOSS_TURRET_FACE_ALPHA_SCALE := 0.62
+const BOSS_TURRET_EDGE_ALPHA := 0.38
+const BOSS_TURRET_BASE_RADIUS := 0.86
+const BOSS_MUZZLE_GLINT_SIZE := 0.26
 const BOSS_TURRET_RADIUS := 0.52
 const BOSS_TURRET_VISUAL_SCALE := 1.40
 const BOSS_TURRET_OVERALL_SCALE := 1.10
@@ -2860,9 +2873,9 @@ func _boss_core_caged_model(color: Color) -> Node3D:
 	core_visual.add_child(_boss_core_energy_shell())
 	core_visual.add_child(_boss_core_wire_sphere(color))
 	core_visual.add_child(_boss_core_caged_inner_mark(color))
-	model.add_child(_boss_core_arc_ring(1.18, 0.014, 3, 3, 0.22, 0.0, "boss-core-ring-cw-inner", color.darkened(0.12), Vector3(0.18, 1.0, 0.36), 0.55, Vector3.FORWARD, 0.10))
-	model.add_child(_boss_core_arc_ring(2.22, BOSS_CAGED_PRIMARY_RING_WIDTH, 4, 5, -0.30, 0.24, "boss-core-ring-ccw-primary", color.lerp(Color.WHITE, 0.58), Vector3(-0.45, 1.0, 0.20), -1.35, Vector3.RIGHT, -0.24, 0.23, 1.00))
-	model.add_child(_boss_core_arc_ring(3.18, BOSS_CAGED_SECONDARY_RING_WIDTH, 5, 6, 0.24, -0.34, "boss-core-ring-cw-outer", color.lerp(Color.WHITE, 0.72), Vector3(0.38, 1.0, -0.52), 0.95, Vector3.FORWARD, 0.34, 0.20, 0.92))
+	model.add_child(_boss_core_arc_ring(1.18, BOSS_RIBBON_INNER_WIDTH, 3, 3, 0.22, 0.0, "boss-core-ring-cw-inner", color.darkened(0.12), Vector3(0.18, 1.0, 0.36), 0.55, Vector3.FORWARD, 0.10))
+	model.add_child(_boss_core_arc_ring(2.22, BOSS_RIBBON_PRIMARY_WIDTH, 4, 5, -0.30, 0.24, "boss-core-ring-ccw-primary", color.lerp(Color.WHITE, 0.58), Vector3(-0.45, 1.0, 0.20), -1.35, Vector3.RIGHT, -0.24, 0.23, 1.00))
+	model.add_child(_boss_core_arc_ring(3.18, BOSS_RIBBON_SECONDARY_WIDTH, 5, 6, 0.24, -0.34, "boss-core-ring-cw-outer", color.lerp(Color.WHITE, 0.72), Vector3(0.38, 1.0, -0.52), 0.95, Vector3.FORWARD, 0.34, 0.20, 0.92, true))
 	model.add_child(_boss_core_gun_orbit(color))
 	return model
 
@@ -2872,29 +2885,38 @@ func _boss_core_wire_sphere(color: Color) -> Node3D:
 	shell.name = "boss-core-wire-sphere"
 	var radius := 0.90
 	var wire_color := color.lerp(Color.WHITE, 0.88)
-	for longitude_index in range(5):
-		var longitude_alpha := 0.26
-		var longitude_emission := 0.72
-		var longitude := _boss_core_ring_mesh(radius, 0.045, wire_color, longitude_alpha, longitude_emission)
-		longitude.name = "boss-core-wire-longitude-%d" % longitude_index
-		longitude.rotation = Vector3(PI * 0.5, TAU * float(longitude_index) / 5.0, 0.0)
-		longitude.set_meta("wire_sphere_ring", true)
-		longitude.set_meta("base_line_color", Color(wire_color.r, wire_color.g, wire_color.b, longitude_alpha))
-		longitude.set_meta("base_emission", longitude_emission)
-		shell.add_child(longitude)
-	for latitude_index in range(5):
-		var latitude_angle := lerpf(-0.78, 0.78, float(latitude_index) / 4.0)
-		var latitude_radius := cos(latitude_angle) * radius
-		var latitude_alpha := 0.21
-		var latitude_emission := 0.58
-		var latitude := _boss_core_ring_mesh(latitude_radius, 0.035, wire_color, latitude_alpha, latitude_emission)
-		latitude.name = "boss-core-wire-latitude-%d" % latitude_index
-		latitude.position.y = sin(latitude_angle) * radius
-		latitude.set_meta("wire_sphere_ring", true)
-		latitude.set_meta("base_line_color", Color(wire_color.r, wire_color.g, wire_color.b, latitude_alpha))
-		latitude.set_meta("base_emission", latitude_emission)
-		shell.add_child(latitude)
+	# The equator is the one strong line; the rest are faint hairlines so the cage reads as a sphere, not a knot.
+	var equator := _boss_core_ring_mesh(radius, 0.040, wire_color, 0.30, 0.82)
+	equator.name = "boss-core-wire-equator"
+	_mark_wire_sphere_line(equator, wire_color, 0.30, 0.82)
+	shell.add_child(equator)
+	for half_sign: float in [1.0, -1.0]:
+		# Each hemisphere is its own node so the cage can split open along the equator.
+		var half := Node3D.new()
+		half.name = "boss-core-wire-upper" if half_sign > 0.0 else "boss-core-wire-lower"
+		half.set_meta("cage_half_sign", half_sign)
+		shell.add_child(half)
+		for longitude_index in range(6):
+			var longitude := _boss_core_arc_mesh(radius, 0.020, 0.0, PI * 0.5, wire_color, 0.22, 0.60)
+			longitude.name = "boss-core-wire-longitude-%d" % longitude_index
+			longitude.rotation = Vector3(0.0, TAU * float(longitude_index) / 6.0, 0.0)
+			longitude.rotate_object_local(Vector3.RIGHT, -PI * 0.5 * half_sign)
+			_mark_wire_sphere_line(longitude, wire_color, 0.22, 0.60)
+			half.add_child(longitude)
+		for latitude_index in range(2):
+			var latitude_angle := (0.42 + 0.40 * float(latitude_index)) * half_sign
+			var latitude := _boss_core_ring_mesh(cos(latitude_angle) * radius, 0.018, wire_color, 0.18, 0.52)
+			latitude.name = "boss-core-wire-latitude-%d" % latitude_index
+			latitude.position.y = sin(latitude_angle) * radius
+			_mark_wire_sphere_line(latitude, wire_color, 0.18, 0.52)
+			half.add_child(latitude)
 	return shell
+
+
+func _mark_wire_sphere_line(line: MeshInstance3D, wire_color: Color, alpha: float, emission: float) -> void:
+	line.set_meta("wire_sphere_ring", true)
+	line.set_meta("base_line_color", Color(wire_color.r, wire_color.g, wire_color.b, alpha))
+	line.set_meta("base_emission", emission)
 
 
 func _boss_core_energy_shell() -> MeshInstance3D:
@@ -2913,25 +2935,29 @@ func _boss_core_energy_shell() -> MeshInstance3D:
 func _boss_core_caged_inner_mark(color: Color) -> Node3D:
 	var mark := Node3D.new()
 	mark.name = "boss-core-inner-mark"
-	mark.rotation = Vector3(0.18, 0.0, -0.24)
-	var extent := 0.64
+	# Lay the long axis mostly across the screen, tipped toward the camera so the gem shows
+	# depth; boss.gd spins it about that axis and slowly swings the axis around.
+	mark.rotation = Vector3(PI * 0.5 - BOSS_CORE_GEM_TILT, 0.0, 0.0)
+	# An octahedron with square girth, stretched along its spin axis.
+	var extent := 0.50
+	var height := extent * BOSS_CORE_GEM_STRETCH
 	var points := PackedVector3Array([
-		Vector3(0.0, extent, 0.0), Vector3(-extent * 0.62, 0.0, -extent * 0.48),
-		Vector3(extent * 0.62, 0.0, -extent * 0.48), Vector3(0.0, -extent, 0.0),
-		Vector3(-extent * 0.42, 0.0, extent * 0.56), Vector3(extent * 0.42, 0.0, extent * 0.56),
+		Vector3(0.0, height, 0.0), Vector3(-extent, 0.0, 0.0),
+		Vector3(0.0, 0.0, -extent), Vector3(0.0, -height, 0.0),
+		Vector3(0.0, 0.0, extent), Vector3(extent, 0.0, 0.0),
 	])
 	var indices := PackedInt32Array([0, 1, 2, 0, 2, 5, 0, 5, 4, 0, 4, 1, 3, 2, 1, 3, 5, 2, 3, 4, 5, 3, 1, 4])
 	var face := _array_mesh(points, indices, VisualMaterialsUtil.flat_face(color.lightened(0.08), 0.30, 0.62))
 	face.name = "boss-core-inner-mark-face"
 	mark.add_child(face)
-	for edge in [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2], [3, 4], [3, 5]]:
+	for edge in [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2], [3, 4], [3, 5], [1, 2], [2, 5], [5, 4], [4, 1]]:
 		var edge_mesh := _boss_core_edge(points[edge[0]], points[edge[1]], 0.018, color.lerp(Color.WHITE, 0.42), 0.42, 1.28)
 		edge_mesh.name = "boss-core-inner-mark-edge"
 		mark.add_child(edge_mesh, true)
 	return mark
 
 
-func _boss_core_arc_ring(radius: float, width: float, gap_start: int, gap_length: int, tilt_x: float, tilt_z: float, ring_name: String, color: Color, orbit_axis := Vector3.UP, orbit_speed := 0.0, precession_axis := Vector3.ZERO, precession_speed := 0.0, alpha := 0.26, emission := 1.05) -> Node3D:
+func _boss_core_arc_ring(radius: float, width: float, gap_start: int, gap_length: int, tilt_x: float, tilt_z: float, ring_name: String, color: Color, orbit_axis := Vector3.UP, orbit_speed := 0.0, precession_axis := Vector3.ZERO, precession_speed := 0.0, alpha := 0.26, emission := 1.05, flat := false) -> Node3D:
 	var ring := Node3D.new()
 	ring.name = ring_name
 	ring.position.y = maxf(0.0, radius - 0.30)
@@ -2941,16 +2967,74 @@ func _boss_core_arc_ring(radius: float, width: float, gap_start: int, gap_length
 	ring.set_meta("orbit_speed", orbit_speed)
 	ring.set_meta("precession_axis", (precession_axis as Vector3).normalized())
 	ring.set_meta("precession_speed", precession_speed)
-	var segments := 24
-	for index in range(segments):
-		if posmod(index - gap_start, segments) < gap_length:
-			continue
-		var a := TAU * float(index) / float(segments)
-		var b := TAU * float(index + 1) / float(segments)
-		var pa := Vector3(cos(a) * radius, 0.0, sin(a) * radius)
-		var pb := Vector3(cos(b) * radius, 0.0, sin(b) * radius)
-		ring.add_child(_boss_core_edge(pa, pb, width, color, alpha, emission))
+	# Gaps keep their original 24-step layout; the ribbon itself is smooth.
+	var from_angle := TAU * float(gap_start + gap_length) / 24.0
+	var to_angle := TAU * float(gap_start + 24) / 24.0
+	if gap_length <= 0:
+		from_angle = 0.0
+		to_angle = TAU
+	ring.add_child(_boss_core_ribbon(radius, width, from_angle, to_angle, color, alpha, emission, flat))
 	return ring
+
+
+# A hoop ribbon. Upright (flat = false) it is a cylindrical strip like an orrery band;
+# flat it is a Saturn-style annulus whose width runs outward from the core.
+func _boss_core_ribbon(radius: float, width: float, from_angle: float, to_angle: float, color: Color, alpha: float, emission: float, flat := false) -> Node3D:
+	var ribbon := Node3D.new()
+	ribbon.name = "boss-core-ribbon"
+	var face_material := VisualMaterialsUtil.outline(color, alpha * BOSS_RIBBON_FACE_ALPHA_SCALE, emission * 0.6)
+	var face: MeshInstance3D
+	if flat:
+		face = _boss_core_arc_mesh(radius, width, from_angle, to_angle, color, alpha, emission)
+		face.material_override = face_material
+	else:
+		var steps := maxi(4, int(ceil(float(BOSS_RIBBON_SEGMENTS) * (to_angle - from_angle) / TAU)))
+		var vertices := PackedVector3Array()
+		var indices := PackedInt32Array()
+		for step in range(steps + 1):
+			var angle := lerpf(from_angle, to_angle, float(step) / float(steps))
+			var radial := Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+			vertices.append(radial + Vector3(0.0, width * 0.5, 0.0))
+			vertices.append(radial - Vector3(0.0, width * 0.5, 0.0))
+			if step < steps:
+				var k := step * 2
+				indices.append_array(PackedInt32Array([k, k + 1, k + 3, k, k + 3, k + 2]))
+		face = _array_mesh(vertices, indices, face_material)
+	face.name = "boss-core-ribbon-face"
+	ribbon.add_child(face)
+	# Crisp rims along both edges and short closing edges at the ribbon's ends.
+	var rim_color := color.lerp(Color.WHITE, 0.25)
+	var rim_alpha := minf(1.0, alpha * 2.2)
+	for rim_sign: float in [1.0, -1.0]:
+		var rim_radius := radius + width * 0.5 * rim_sign if flat else radius
+		var rim := _boss_core_arc_mesh(rim_radius, BOSS_RIBBON_EDGE_WIDTH, from_angle, to_angle, rim_color, rim_alpha, emission * 1.2)
+		rim.name = "boss-core-ribbon-rim"
+		if not flat:
+			rim.position.y = width * 0.5 * rim_sign
+		ribbon.add_child(rim)
+	if to_angle - from_angle < TAU - 0.001:
+		for end_angle: float in [from_angle, to_angle]:
+			var direction := Vector3(cos(end_angle), 0.0, sin(end_angle))
+			var a := direction * (radius - width * 0.5) if flat else direction * radius + Vector3(0.0, width * 0.5, 0.0)
+			var b := direction * (radius + width * 0.5) if flat else direction * radius - Vector3(0.0, width * 0.5, 0.0)
+			ribbon.add_child(_boss_core_edge(a, b, BOSS_RIBBON_EDGE_WIDTH, rim_color, rim_alpha, emission * 1.2))
+	return ribbon
+
+
+# A smooth flat arc band in the local XZ plane.
+func _boss_core_arc_mesh(radius: float, width: float, from_angle: float, to_angle: float, color: Color, alpha: float, emission: float) -> MeshInstance3D:
+	var vertices := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var steps := maxi(4, int(ceil(float(BOSS_RIBBON_SEGMENTS) * (to_angle - from_angle) / TAU)))
+	for step in range(steps + 1):
+		var angle := lerpf(from_angle, to_angle, float(step) / float(steps))
+		var direction := Vector3(cos(angle), 0.0, sin(angle))
+		vertices.append(direction * (radius - width * 0.5))
+		vertices.append(direction * (radius + width * 0.5))
+		if step < steps:
+			var k := step * 2
+			indices.append_array(PackedInt32Array([k, k + 1, k + 3, k, k + 3, k + 2]))
+	return _array_mesh(vertices, indices, VisualMaterialsUtil.outline(color, alpha, emission))
 
 
 func _boss_core_gun_orbit(color: Color) -> Node3D:
@@ -2980,7 +3064,7 @@ func _boss_core_ring_mesh(radius: float, width: float, color: Color, alpha: floa
 	var vertices := PackedVector3Array()
 	var indices := PackedInt32Array()
 	var inner_radius := maxf(0.02, radius - width)
-	var segments := 48
+	var segments := BOSS_RIBBON_SEGMENTS
 	for segment in range(segments):
 		var angle_a := TAU * float(segment) / float(segments)
 		var angle_b := TAU * float(segment + 1) / float(segments)
@@ -3052,6 +3136,7 @@ func _spawn_boss_turret(kind: String) -> void:
 	enemy.opposing_gun = node.find_child("boss-t2-opposing-gun", true, false)
 	enemy.direction_guns = node.find_children("boss-t2-direction-gun*", "Node3D", true, false)
 	enemy.emitters = node.find_children("boss-t3-emitter*", "Node3D", true, false)
+	enemy.muzzle_glints = node.find_children("boss-t-muzzle-glint", "MeshInstance3D", true, false)
 	_lock_spawn_collision(enemy)
 	enemies.append(enemy)
 
@@ -3176,10 +3261,11 @@ func _add_boss_t_tri_prism(root: Node3D, radius: float, height: float, color: Co
 		1, 4, 5, 1, 5, 2,
 		2, 5, 3, 2, 3, 0,
 	])
-	var face := _array_mesh(points, indices, VisualMaterialsUtil.flat_face(color, 0.26, 0.58))
+	var face_alpha := 0.26 * BOSS_TURRET_FACE_ALPHA_SCALE
+	var face := _array_mesh(points, indices, VisualMaterialsUtil.flat_face(color, face_alpha, 0.58))
 	face.name = "boss-t-body-face"
 	face.set_meta("base_color", color)
-	face.set_meta("base_alpha", 0.26)
+	face.set_meta("base_alpha", face_alpha)
 	face.set_meta("base_emission", 0.58)
 	face.set_meta("hit_alpha_gain", 0.32)
 	face.set_meta("hit_emission", 2.10)
@@ -3190,21 +3276,47 @@ func _add_boss_t_tri_prism(root: Node3D, radius: float, height: float, color: Co
 		[3, 4], [4, 5], [5, 3],
 		[0, 3], [1, 4], [2, 5],
 	]:
-		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color, 0.014))
+		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color, 0.014, BOSS_TURRET_EDGE_ALPHA))
 
 
 func _boss_t_tripod_base_model(color: Color) -> Node3D:
+	# Three jointed landing legs: a strut rises from the hub to a knee block, then a
+	# second strut drops to a foot pad. Box struts keep the low-poly look without
+	# laying flat translucent panels under the body.
 	var base := Node3D.new()
 	base.name = "boss-t-tripod-base"
 	var base_color := color.lerp(Color.WHITE, 0.18)
 	_add_boss_t_base_hub(base, base_color.lightened(0.06))
 	for index in range(3):
 		var angle := -PI * 0.5 + TAU * float(index) / 3.0
-		var inner := Vector3(cos(angle) * 0.16, -0.075, sin(angle) * 0.16)
-		var outer := Vector3(cos(angle) * 0.86, -0.130, sin(angle) * 0.86)
-		_add_boss_t_base_leg_panel(base, inner, outer, angle, base_color)
-		_add_boss_t_base_foot(base, outer, angle, base_color.lightened(0.04))
+		var direction := Vector3(cos(angle), 0.0, sin(angle))
+		var hip := direction * 0.18 + Vector3(0.0, -0.06, 0.0)
+		var knee := direction * 0.58 + Vector3(0.0, 0.05, 0.0)
+		var foot := direction * BOSS_TURRET_BASE_RADIUS + Vector3(0.0, -0.13, 0.0)
+		_add_boss_t_leg_strut(base, hip, knee, 0.075, base_color)
+		_add_boss_t_leg_strut(base, knee, foot, 0.060, base_color.lightened(0.04))
+		var knee_block := Node3D.new()
+		knee_block.name = "boss-t-tripod-knee"
+		knee_block.position = knee
+		knee_block.rotation.y = -angle
+		base.add_child(knee_block)
+		_add_zako4_box_part(knee_block, Vector3.ZERO, Vector3(0.11, 0.09, 0.11), base_color.lightened(0.08), 0.009, 0.22, 0.95)
+		var foot_pad := Node3D.new()
+		foot_pad.name = "boss-t-tripod-foot"
+		foot_pad.position = foot
+		foot_pad.rotation.y = -angle
+		base.add_child(foot_pad)
+		_add_zako4_box_part(foot_pad, Vector3.ZERO, Vector3(0.10, 0.03, 0.22), base_color.lightened(0.04), 0.008, 0.20, 0.95)
 	return base
+
+
+func _add_boss_t_leg_strut(root: Node3D, from: Vector3, to: Vector3, thickness: float, color: Color) -> void:
+	var strut := Node3D.new()
+	strut.name = "boss-t-tripod-strut"
+	strut.position = (from + to) * 0.5
+	strut.basis = Basis.looking_at(to - from, Vector3.UP)
+	root.add_child(strut)
+	_add_zako4_box_part(strut, Vector3.ZERO, Vector3(thickness, thickness * 0.7, from.distance_to(to)), color, 0.008, 0.16, 0.85)
 
 
 func _add_boss_t_base_hub(root: Node3D, color: Color) -> void:
@@ -3217,37 +3329,6 @@ func _add_boss_t_base_hub(root: Node3D, color: Color) -> void:
 	root.add_child(hub)
 	for edge in [[0, 1], [1, 2], [2, 0]]:
 		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color.lightened(0.04), 0.012))
-
-
-func _add_boss_t_base_leg_panel(root: Node3D, inner: Vector3, outer: Vector3, angle: float, color: Color) -> void:
-	var side := Vector3(-sin(angle), 0.0, cos(angle))
-	var inner_width := 0.070
-	var outer_width := 0.180
-	var points := PackedVector3Array([
-		inner - side * inner_width,
-		inner + side * inner_width,
-		outer + side * outer_width,
-		outer - side * outer_width,
-	])
-	var panel := _array_mesh(points, PackedInt32Array([0, 1, 2, 0, 2, 3]), VisualMaterialsUtil.flat_face(color, 0.115, 0.34))
-	panel.name = "boss-t-tripod-leg-panel"
-	panel.set_meta("tripod_leg_panel", true)
-	root.add_child(panel)
-	for edge in [[0, 1], [1, 2], [2, 3], [3, 0]]:
-		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color.lightened(0.06), 0.010))
-	root.add_child(_subtle_glow_edge((points[0] + points[1]) * 0.5, (points[2] + points[3]) * 0.5, color.lightened(0.02), 0.008))
-
-
-func _add_boss_t_base_foot(root: Node3D, center: Vector3, angle: float, color: Color) -> void:
-	var foot := MeshInstance3D.new()
-	foot.name = "boss-t-tripod-foot"
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(0.22, 0.018, 0.075)
-	foot.mesh = mesh
-	foot.position = center
-	foot.rotation.y = -angle + PI * 0.5
-	foot.material_override = VisualMaterialsUtil.flat_face(color, 0.18, 0.42)
-	root.add_child(foot)
 
 
 func _add_boss_t1_mounts(root: Node3D, color: Color, frame_color: Color, height: float) -> void:
@@ -3301,6 +3382,20 @@ func _add_boss_t3_emitters(root: Node3D, color: Color, height: float) -> void:
 		emitter.add_child(_boss_t_prism_gun(color.lightened(0.14)))
 
 
+func _boss_muzzle_glint(tip: Vector3) -> MeshInstance3D:
+	# Hidden until boss.gd scales it up while the gun charges, as a firing tell.
+	var glint := MeshInstance3D.new()
+	glint.name = "boss-t-muzzle-glint"
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(BOSS_MUZZLE_GLINT_SIZE, 0.006, BOSS_MUZZLE_GLINT_SIZE)
+	glint.mesh = mesh
+	glint.position = tip
+	glint.rotation.y = PI * 0.25
+	glint.scale = Vector3.ZERO
+	glint.material_override = VisualMaterialsUtil.outline(Color(1.0, 0.93, 0.70), 0.95, 2.6)
+	return glint
+
+
 func _boss_t_prism_gun(color: Color) -> Node3D:
 	var gun := Node3D.new()
 	gun.name = "boss-t-prism-gun"
@@ -3312,6 +3407,7 @@ func _boss_t_prism_gun(color: Color) -> Node3D:
 	gun.add_child(_array_mesh(points, indices, VisualMaterialsUtil.flat_face(color, 0.38, 0.68)))
 	for edge in [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]:
 		gun.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color, 0.012))
+	gun.add_child(_boss_muzzle_glint(points[0]))
 	return gun
 
 
@@ -3329,6 +3425,7 @@ func _boss_t1_rapid_prism_gun(color: Color) -> Node3D:
 	for edge in [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]:
 		gun.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color.lightened(0.04), BOSS_T_RAPID_GUN_EDGE_WIDTH))
 	gun.add_child(_subtle_glow_edge(Vector3(-0.22, 0.02, 0.24), Vector3(0.22, 0.02, 0.24), color.lightened(0.04), BOSS_T_RAPID_GUN_EDGE_WIDTH))
+	gun.add_child(_boss_muzzle_glint(points[0]))
 	return gun
 
 
@@ -3346,6 +3443,7 @@ func _boss_t2_direction_prism_gun(color: Color) -> Node3D:
 	for edge in [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]]:
 		gun.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color.lightened(0.03), BOSS_T_DIRECTION_GUN_EDGE_WIDTH))
 	gun.add_child(_subtle_glow_edge(Vector3(-0.20, 0.02, 0.28), Vector3(0.20, 0.02, 0.28), color.lightened(0.03), BOSS_T_DIRECTION_GUN_EDGE_WIDTH))
+	gun.add_child(_boss_muzzle_glint(points[0]))
 	return gun
 
 
@@ -3362,6 +3460,7 @@ func _add_boss_t_box_part(root: Node3D, center: Vector3, size: Vector3, color: C
 		0, 4, 5, 0, 5, 1, 1, 5, 6, 1, 6, 2,
 		2, 6, 7, 2, 7, 3, 3, 7, 4, 3, 4, 0,
 	])
+	alpha *= BOSS_TURRET_FACE_ALPHA_SCALE
 	var face := _array_mesh(points, indices, VisualMaterialsUtil.flat_face(color, alpha, 0.58))
 	face.name = "boss-t-body-face"
 	face.set_meta("base_color", color)
@@ -3375,7 +3474,7 @@ func _add_boss_t_box_part(root: Node3D, center: Vector3, size: Vector3, color: C
 		[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
 		[0, 4], [1, 5], [2, 6], [3, 7],
 	]:
-		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color, edge_width))
+		root.add_child(_subtle_glow_edge(points[edge[0]], points[edge[1]], color, edge_width, BOSS_TURRET_EDGE_ALPHA))
 
 
 func _boss_connection_ribbon_trial_model(variant: int) -> Node3D:
@@ -3409,23 +3508,31 @@ func _boss_connection_ribbon_trial_model(variant: int) -> Node3D:
 	return model
 
 
-func _boss_connection_ribbon_runtime_model(start: Vector2, finish: Vector2, seed: int) -> Node3D:
+func _boss_connection_ribbon_runtime_model(_start: Vector2, _finish: Vector2, seed: int) -> Node3D:
+	# A soft translucent cable; boss.gd reshapes it every frame and moves the pulses along it.
 	var root := Node3D.new()
 	root.name = "BossCoreConnection"
 	root.set_meta("connection_seed", seed)
-	var points := _boss_connection_runtime_points(start, finish, seed)
 	var ribbon_color := Color(0.82, 0.96, 1.0)
-	var main := _boss_connection_ribbon_mesh(points, 0.11, ribbon_color, 0.15, 0.48)
-	main.name = "BossCoreConnectionRibbonMain"
-	root.add_child(main)
-	var highlight := _boss_connection_ribbon_mesh(_boss_connection_offset_points(points, Vector3(0.0, 0.07, 0.05)), 0.045, Color.WHITE, 0.11, 0.62)
-	highlight.name = "BossCoreConnectionRibbonHighlight"
-	root.add_child(highlight)
+	var face := MeshInstance3D.new()
+	face.name = "BossCoreConnectionRibbonMain"
+	face.material_override = VisualMaterialsUtil.overlay_face(ribbon_color, 0.10, 0.45, 7)
+	root.add_child(face)
+	var rims := MeshInstance3D.new()
+	rims.name = "BossCoreConnectionRibbonHighlight"
+	rims.material_override = VisualMaterialsUtil.outline(ribbon_color, 0.30, 0.9)
+	root.add_child(rims)
+	var pulse_material := VisualMaterialsUtil.outline(Color(0.90, 1.0, 1.0), 0.90, 2.2)
+	for index in range(BOSS_CONNECTION_PULSES):
+		var pulse := MeshInstance3D.new()
+		pulse.name = "BossCoreConnectionPulse%d" % index
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.11, 0.006, 0.11)
+		pulse.mesh = mesh
+		pulse.rotation.y = PI * 0.25
+		pulse.material_override = pulse_material
+		root.add_child(pulse)
 	return root
-
-
-func _boss_connection_runtime_points(start: Vector2, finish: Vector2, seed: int) -> Array[Vector3]:
-	return _boss_connection_trial_points(Vector3(start.x, 0.10, start.y), Vector3(finish.x, 0.16, finish.y), seed)
 
 
 func _boss_connection_trial_points(start: Vector3, finish: Vector3, variant: int) -> Array[Vector3]:
@@ -5038,7 +5145,7 @@ func _smooth_ring_mesh(radius: float, tube: float, color: Color) -> MeshInstance
 	return ring
 
 
-func _subtle_glow_edge(a: Vector3, b: Vector3, color: Color, width: float) -> MeshInstance3D:
+func _subtle_glow_edge(a: Vector3, b: Vector3, color: Color, width: float, alpha := 0.22) -> MeshInstance3D:
 	var direction := b - a
 	var edge := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
@@ -5046,7 +5153,7 @@ func _subtle_glow_edge(a: Vector3, b: Vector3, color: Color, width: float) -> Me
 	edge.mesh = mesh
 	edge.position = (a + b) * 0.5
 	edge.quaternion = Quaternion(Vector3.FORWARD, direction.normalized())
-	edge.material_override = VisualMaterialsUtil.outline(color, 0.22, 0.95)
+	edge.material_override = VisualMaterialsUtil.outline(color, alpha, 0.95)
 	return edge
 
 

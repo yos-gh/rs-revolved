@@ -6,6 +6,7 @@ const PlayfieldUtil := preload("res://scripts/core/playfield.gd")
 const CORE_RING_CW_SPEED := 0.75
 const CORE_RING_CCW_SPEED := -1.50
 const CORE_MARK_SPEED := 0.42
+const CORE_MARK_PRECESSION_SPEED := 0.31
 const CORE_WIRE_ROTATION_SPEED := Vector3(0.46, 0.72, 0.31)
 const CORE_SHELL_BASE_COLOR := Color.WHITE
 const CORE_SHELL_BASE_ALPHA := 0.055
@@ -21,10 +22,18 @@ const CORE_LOCKED_WIRE_ALPHA_MIN := 0.105
 const CORE_LOCKED_WIRE_ALPHA_MAX := 0.245
 const CORE_LOCKED_WIRE_EMISSION_MIN := 0.28
 const CORE_LOCKED_WIRE_EMISSION_MAX := 0.82
+# The cage's hemispheres slide apart along its own axis once the core is exposed.
+const CORE_CAGE_OPEN_DISTANCE := 0.26
+const CORE_CAGE_OPEN_SPEED := 0.9
 const TURRET_FACE_HIT_ALPHA_GAIN := 0.20
 const TURRET_FACE_HIT_EMISSION := 1.45
 const TURRET_DAMAGE_FLASH_DECAY := 20.0
 const TURRET_DAMAGE_FLASH_INTERVAL := 0.11
+# Muzzles glint in the run-up to each volley; the window is the tail of each firing cycle.
+const TURRET_CHARGE_TIME := 0.38
+const TURRET_FIRING_GLINT := 0.55
+# Below this share of life the body starts to stutter, more often as it nears destruction.
+const TURRET_WEAR_START := 0.5
 const CORE_GUN_ORBIT_SPEED := PI
 const CORE_GUN_FIRE_INTERVAL := 20.0 / 60.0
 const CORE_VISUAL_SCALE := 1.30
@@ -58,6 +67,20 @@ const TURRET_BODY_T2_SPIN_SPEED := 0.20
 const TURRET_BODY_T3_AIM_BLEND := 0.32
 const SPAWN_RANDOM_ATTEMPTS := 32
 const SPAWN_FALLBACK_GRID_STEPS := 12
+const TENTACLE_SAMPLES := 72
+# The tentacle's sway is an audio-waveform-like signal: alternating peaks of random height
+# that scroll from the core to the turret and now and then jump to a new height.
+const TENTACLE_KNOTS := 22
+const TENTACLE_KNOT_SPEED := 3.0
+const TENTACLE_KICK_RATE := 2.6
+const TENTACLE_KNOT_RESPONSE := 16.0
+const TENTACLE_SPIKE_CHANCE := 0.20
+const TENTACLE_SAME_SIGN_CHANCE := 0.22
+const TENTACLE_ROOT_WIDTH := 0.16
+const TENTACLE_TIP_WIDTH := 0.06
+const TENTACLE_RIM_RATIO := 0.08
+const TENTACLE_TWIST := 1.25
+const TENTACLE_PULSE_SPEED := 2.4
 
 var center := Vector2.ZERO
 
@@ -110,7 +133,9 @@ func _update_core(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_m
 	var core_mark := enemy.get("core_mark") as Node3D
 	if core_mark != null:
 		core_mark.visible = enemy.damageable
-		core_mark.rotate_y(delta * CORE_MARK_SPEED)
+		core_mark.rotate_object_local(Vector3.UP, delta * CORE_MARK_SPEED * 2.0)
+		# Precess the tilted spin axis about the view axis so it never settles on one heading.
+		core_mark.rotate(Vector3.UP, delta * CORE_MARK_PRECESSION_SPEED)
 	var wire_sphere := enemy.get("wire_sphere") as Node3D
 	if wire_sphere != null:
 		wire_sphere.visible = true
@@ -118,6 +143,7 @@ func _update_core(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_m
 		wire_sphere.rotate_y(delta * CORE_WIRE_ROTATION_SPEED.y)
 		wire_sphere.rotate_z(delta * CORE_WIRE_ROTATION_SPEED.z)
 		_update_core_wire_sphere_visual(wire_sphere, enemy.damageable)
+		_update_core_cage_opening(wire_sphere, enemy.damageable, delta)
 	_update_core_damage_visual(enemy, delta)
 	for ring_cw in enemy.get("rings_cw", []):
 		_update_core_ring(ring_cw as Node3D, delta, CORE_RING_CW_SPEED)
@@ -169,8 +195,10 @@ func _update_core_damage_visual(enemy: Dictionary, delta: float) -> void:
 
 
 func _update_core_wire_sphere_visual(wire_sphere: Node3D, damageable: bool) -> void:
-	for child in wire_sphere.get_children():
-		var mesh := child as MeshInstance3D
+	if not wire_sphere.has_meta("wire_lines"):
+		wire_sphere.set_meta("wire_lines", wire_sphere.find_children("*", "MeshInstance3D", true, false))
+	for line in wire_sphere.get_meta("wire_lines"):
+		var mesh := line as MeshInstance3D
 		if mesh == null:
 			continue
 		var material := mesh.material_override as ShaderMaterial
@@ -190,6 +218,14 @@ func _update_core_wire_sphere_visual(wire_sphere: Node3D, damageable: bool) -> v
 		)
 		material.set_shader_parameter("line_color", locked_color)
 		material.set_shader_parameter("emission_strength", randf_range(CORE_LOCKED_WIRE_EMISSION_MIN, CORE_LOCKED_WIRE_EMISSION_MAX))
+
+
+func _update_core_cage_opening(wire_sphere: Node3D, damageable: bool, delta: float) -> void:
+	for half in wire_sphere.get_children():
+		if not half.has_meta("cage_half_sign"):
+			continue
+		var target: float = (half.get_meta("cage_half_sign") as float) * CORE_CAGE_OPEN_DISTANCE if damageable else 0.0
+		half.position.y = move_toward(half.position.y, target, delta * CORE_CAGE_OPEN_SPEED)
 
 
 func _update_core_ring(ring: Node3D, delta: float, fallback_speed: float) -> void:
@@ -283,6 +319,29 @@ func _update_turret(enemy: Dictionary, delta: float, player_pos: Vector2, bullet
 	else:
 		_update_turret_t3(enemy, delta, player_pos, bullet_manager)
 	_update_turret_recoil(enemy, delta)
+	_update_turret_muzzle_glints(enemy)
+
+
+func _update_turret_muzzle_glints(enemy: Dictionary) -> void:
+	var glints: Array = enemy.get("muzzle_glints", [])
+	if glints.is_empty():
+		return
+	var level := 0.0
+	if enemy.age > 0.6:
+		var cycle_length := 1.0 if enemy.kind == "boss_turret_t3" else 2.0
+		var firing_length := 0.0
+		if enemy.kind == "boss_turret_t1":
+			firing_length = 0.5
+		elif enemy.kind == "boss_turret_t2":
+			firing_length = 1.67
+		var phase := fmod(float(enemy.age) + float(enemy.fire_offset), cycle_length)
+		var charge_start := cycle_length - TURRET_CHARGE_TIME
+		if phase >= charge_start:
+			level = (phase - charge_start) / TURRET_CHARGE_TIME
+		elif phase < firing_length:
+			level = TURRET_FIRING_GLINT * (0.75 + 0.25 * sin(phase * 60.0))
+	for glint in glints:
+		(glint as Node3D).scale = Vector3.ONE * maxf(0.0001, level * level)
 
 
 func _update_turret_damage_visual(enemy: Dictionary, delta: float) -> void:
@@ -294,6 +353,12 @@ func _update_turret_damage_visual(enemy: Dictionary, delta: float) -> void:
 	enemy.turret_last_life = current_life
 	enemy.turret_damage_flash_cooldown = cooldown
 	var flash: float = enemy.turret_damage_flash
+	if not enemy.has("turret_max_life"):
+		enemy.turret_max_life = maxi(1, current_life)
+	var life_ratio := float(current_life) / float(enemy.turret_max_life)
+	var wear := clampf((TURRET_WEAR_START - life_ratio) / TURRET_WEAR_START, 0.0, 1.0)
+	# Worn turrets drop out for a frame now and then, like a failing circuit.
+	var wear_dim := 0.35 if randf() < wear * 0.16 else 1.0
 	for face_node in enemy.get("body_faces", []):
 		var face := face_node as MeshInstance3D
 		if face == null:
@@ -308,7 +373,7 @@ func _update_turret_damage_visual(enemy: Dictionary, delta: float) -> void:
 		var hit_emission: float = face.get_meta("hit_emission", TURRET_FACE_HIT_EMISSION)
 		var hit_whiten: float = face.get_meta("hit_whiten", 0.34)
 		var hit_color := base_color.lerp(Color.WHITE, hit_whiten * flash)
-		hit_color.a = lerpf(base_alpha, minf(0.72, base_alpha + hit_alpha_gain), flash)
+		hit_color.a = lerpf(base_alpha, minf(0.72, base_alpha + hit_alpha_gain), flash) * wear_dim
 		material.set_shader_parameter("face_color", hit_color)
 		material.set_shader_parameter("emission_strength", lerpf(base_emission, hit_emission, flash))
 	enemy.turret_damage_flash = maxf(0.0, flash - delta * TURRET_DAMAGE_FLASH_DECAY)
@@ -445,16 +510,148 @@ func _update_connection_line(line: Node3D, a: Vector2, b: Vector2, delta := 0.0)
 	if line is MeshInstance3D:
 		_update_legacy_connection_line(line as MeshInstance3D, a, b)
 		return
+	var time := float(line.get_meta("connection_time", 0.0)) + delta
+	line.set_meta("connection_time", time)
 	var seed := int(line.get_meta("connection_seed", 0))
-	var point_count := _connection_ribbon_point_count(a, b)
-	var motion_offsets := _connection_ribbon_motion_offsets(line, point_count, seed, delta)
-	var points := _connection_ribbon_points(a, b, seed, motion_offsets)
-	var main := line.find_child("BossCoreConnectionRibbonMain", false, false) as MeshInstance3D
-	if main != null:
-		main.mesh = _connection_ribbon_mesh(points, 0.11)
-	var highlight := line.find_child("BossCoreConnectionRibbonHighlight", false, false) as MeshInstance3D
-	if highlight != null:
-		highlight.mesh = _connection_ribbon_mesh(_connection_offset_points(points, Vector3(0.0, 0.07, 0.05)), 0.045)
+	var wave := _advance_tentacle_wave(line, delta)
+	var points := _tentacle_points(a, b, seed, time, wave, float(line.get_meta("wave_scroll", 0.0)))
+	var widths := _tentacle_widths(points.size(), seed, time)
+	var sides := _tentacle_sides(points, seed, time)
+	var face := line.find_child("BossCoreConnectionRibbonMain", false, false) as MeshInstance3D
+	if face != null:
+		face.mesh = _tentacle_strip_mesh(points, sides, widths, -0.5, 0.5)
+	var rims := line.find_child("BossCoreConnectionRibbonHighlight", false, false) as MeshInstance3D
+	if rims != null:
+		var rim_mesh := _tentacle_strip_mesh(points, sides, widths, 0.5 - TENTACLE_RIM_RATIO, 0.5)
+		_append_tentacle_strip(rim_mesh, points, sides, widths, -0.5, -0.5 + TENTACLE_RIM_RATIO)
+		rims.mesh = rim_mesh
+	_update_tentacle_pulses(line, points, a.distance_to(b), time)
+
+
+func _advance_tentacle_wave(line: Node3D, delta: float) -> PackedFloat32Array:
+	var values: PackedFloat32Array = line.get_meta("wave_values", PackedFloat32Array())
+	var targets: PackedFloat32Array = line.get_meta("wave_targets", PackedFloat32Array())
+	if values.size() != TENTACLE_KNOTS:
+		values.resize(TENTACLE_KNOTS)
+		targets.resize(TENTACLE_KNOTS)
+		for index in range(TENTACLE_KNOTS):
+			targets[index] = _tentacle_peak(1.0 if index % 2 == 0 else -1.0)
+			values[index] = targets[index]
+	var scroll := float(line.get_meta("wave_scroll", 0.0)) + delta * TENTACLE_KNOT_SPEED
+	while scroll >= 1.0:
+		scroll -= 1.0
+		# A fresh peak is born at the core end; the rest move one knot outward.
+		var born := _tentacle_peak(-signf(targets[0]) if targets[0] != 0.0 else 1.0)
+		targets.remove_at(TENTACLE_KNOTS - 1)
+		values.remove_at(TENTACLE_KNOTS - 1)
+		targets.insert(0, born)
+		values.insert(0, born)
+	var response := 1.0 - exp(-TENTACLE_KNOT_RESPONSE * delta)
+	for index in range(TENTACLE_KNOTS):
+		if randf() < TENTACLE_KICK_RATE * delta:
+			targets[index] = _tentacle_peak(signf(targets[index]) if targets[index] != 0.0 else 1.0)
+		values[index] = lerpf(values[index], targets[index], response)
+	line.set_meta("wave_values", values)
+	line.set_meta("wave_targets", targets)
+	line.set_meta("wave_scroll", scroll)
+	return values
+
+
+func _tentacle_peak(sign_value: float) -> float:
+	# Mostly modest peaks with the occasional tall spike, like a music waveform.
+	var magnitude := 0.04 + pow(randf(), 2.2) * 0.85
+	if randf() < TENTACLE_SPIKE_CHANCE:
+		magnitude += randf_range(0.6, 1.2)
+	# Now and then two peaks lean the same way, breaking the zigzag into a broader swell.
+	if randf() < TENTACLE_SAME_SIGN_CHANCE:
+		sign_value = -sign_value
+	return magnitude * sign_value
+
+
+func _tentacle_points(a: Vector2, b: Vector2, seed: int, time: float, wave: PackedFloat32Array, scroll: float) -> Array[Vector3]:
+	# Both ends stay pinned; the waveform rides on a slow whole-body sway.
+	var start := Vector3(a.x, 0.10, a.y)
+	var finish := Vector3(b.x, 0.16, b.y)
+	var span := b - a
+	var length := maxf(0.001, span.length())
+	var normal := Vector3(-span.y, 0.0, span.x) / length
+	var amplitude := clampf(length * 0.06, 0.20, 0.42)
+	var sway := sin(time * 0.45 + float(seed) * 1.7) * 0.35
+	var points: Array[Vector3] = []
+	for index in range(TENTACLE_SAMPLES):
+		var t := float(index) / float(TENTACLE_SAMPLES - 1)
+		var envelope := pow(sin(t * PI), 0.7)
+		var knot := clampf(t * float(TENTACLE_KNOTS - 1) - scroll, 0.0, float(TENTACLE_KNOTS - 1))
+		var low := mini(int(knot), TENTACLE_KNOTS - 2)
+		var blend := 0.5 - 0.5 * cos((knot - float(low)) * PI)
+		var wave_signal := lerpf(wave[low], wave[low + 1], blend)
+		var point := start.lerp(finish, t) + normal * (wave_signal + sway) * amplitude * envelope
+		point.y += envelope * 0.30
+		points.append(point)
+	return points
+
+
+func _tentacle_widths(count: int, seed: int, time: float) -> PackedFloat32Array:
+	var widths := PackedFloat32Array()
+	for index in range(count):
+		var t := float(index) / float(count - 1)
+		# Broad at the core, tapering toward the turret, with a slow peristaltic swell.
+		var swell := 1.0 + 0.18 * sin(t * TAU * 1.6 - time * 1.8 + float(seed))
+		widths.append(lerpf(TENTACLE_ROOT_WIDTH, TENTACLE_TIP_WIDTH, t) * swell)
+	return widths
+
+
+func _tentacle_sides(points: Array[Vector3], seed: int, time: float) -> Array[Vector3]:
+	# The ribbon slowly twists about its own length; seen from above it narrows to a
+	# line where it turns edge-on, which is what makes it read as flat rather than a tube.
+	var sides: Array[Vector3] = []
+	for index in range(points.size()):
+		var t := float(index) / float(points.size() - 1)
+		var previous := points[maxi(0, index - 1)]
+		var next := points[mini(points.size() - 1, index + 1)]
+		var tangent := (next - previous).normalized()
+		var flat_side := Vector3(-tangent.z, 0.0, tangent.x).normalized()
+		var twist := TENTACLE_TWIST * sin(t * TAU * 0.9 - time * 0.8 + float(seed) * 2.3)
+		sides.append(flat_side.rotated(tangent, twist))
+	return sides
+
+
+func _tentacle_strip_mesh(points: Array[Vector3], sides: Array[Vector3], widths: PackedFloat32Array, from_ratio: float, to_ratio: float) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	_append_tentacle_strip(mesh, points, sides, widths, from_ratio, to_ratio)
+	return mesh
+
+
+func _append_tentacle_strip(mesh: ArrayMesh, points: Array[Vector3], sides: Array[Vector3], widths: PackedFloat32Array, from_ratio: float, to_ratio: float) -> void:
+	# A zero-thickness strip; ratios pick a lane across the width (-0.5 .. 0.5).
+	var verts := PackedVector3Array()
+	var indices := PackedInt32Array()
+	for index in range(points.size()):
+		verts.append(points[index] + sides[index] * widths[index] * from_ratio)
+		verts.append(points[index] + sides[index] * widths[index] * to_ratio)
+		if index < points.size() - 1:
+			var base := index * 2
+			indices.append_array([base, base + 1, base + 2, base + 1, base + 3, base + 2])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_INDEX] = indices
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+func _update_tentacle_pulses(line: Node3D, points: Array[Vector3], length: float, time: float) -> void:
+	# Specks of light carried from the core out to the turret.
+	var pulses := line.find_children("BossCoreConnectionPulse*", "Node3D", false, false)
+	if pulses.is_empty():
+		return
+	var cycle := maxf(0.5, length / TENTACLE_PULSE_SPEED)
+	for pulse_index in range(pulses.size()):
+		var pulse := pulses[pulse_index] as Node3D
+		var progress := fposmod(time / cycle + float(pulse_index) / float(pulses.size()), 1.0)
+		var position := progress * float(points.size() - 1)
+		var low := mini(int(position), points.size() - 2)
+		pulse.position = points[low].lerp(points[low + 1], position - float(low)) + Vector3(0.0, 0.02, 0.0)
+		pulse.scale = Vector3.ONE * maxf(0.001, sin(progress * PI))
 
 
 func _update_legacy_connection_line(line: MeshInstance3D, a: Vector2, b: Vector2) -> void:
@@ -465,118 +662,6 @@ func _update_legacy_connection_line(line: MeshInstance3D, a: Vector2, b: Vector2
 		mesh.size.z = direction.length()
 	line.position = Vector3(mid.x, 0.08, mid.y)
 	line.rotation.y = -direction.angle() + PI * 0.5
-
-
-func _connection_ribbon_point_count(a: Vector2, b: Vector2) -> int:
-	return clampi(8 + int(a.distance_to(b) * 0.75), 8, 14)
-
-
-func _connection_ribbon_motion_offsets(line: Node3D, count: int, seed: int, delta: float) -> Array[Vector3]:
-	var stored_offsets: Array = line.get_meta("connection_offsets", [])
-	var stored_velocities: Array = line.get_meta("connection_velocities", [])
-	var offsets: Array[Vector3] = []
-	var velocities: Array[Vector3] = []
-	if stored_offsets.size() == count and stored_velocities.size() == count:
-		for index in range(count):
-			offsets.append(stored_offsets[index] as Vector3)
-			velocities.append(stored_velocities[index] as Vector3)
-	if offsets.size() != count or velocities.size() != count:
-		offsets = []
-		velocities = []
-		for index in range(count):
-			var t := float(index) / float(count - 1)
-			var end_fade := sin(t * PI)
-			var initial := Vector3(
-				sin(float(seed * 19 + index * 31)) * 0.07,
-				sin(float(seed * 23 + index * 17)) * 0.10,
-				cos(float(seed * 29 + index * 13)) * 0.14
-			) * end_fade
-			var direction := Vector3(
-				sin(float(seed * 41 + index * 7)),
-				cos(float(seed * 37 + index * 11)),
-				sin(float(seed * 43 + index * 5))
-			).normalized()
-			var speed := lerpf(0.08, 0.56, 0.5 + 0.5 * sin(float(seed * 47 + index * 3)))
-			offsets.append(initial)
-			velocities.append(direction * speed * end_fade)
-	for index in range(count):
-		var t := float(index) / float(count - 1)
-		var end_fade := sin(t * PI)
-		var offset := offsets[index] as Vector3
-		var velocity := velocities[index] as Vector3
-		offset += velocity * delta
-		var limit := Vector3(0.34, 0.42, 0.70) * end_fade
-		if absf(offset.x) > limit.x:
-			offset.x = clampf(offset.x, -limit.x, limit.x)
-			velocity.x *= -1.0
-		if absf(offset.y) > limit.y:
-			offset.y = clampf(offset.y, -limit.y, limit.y)
-			velocity.y *= -1.0
-		if absf(offset.z) > limit.z:
-			offset.z = clampf(offset.z, -limit.z, limit.z)
-			velocity.z *= -1.0
-		offsets[index] = offset
-		velocities[index] = velocity
-	line.set_meta("connection_offsets", offsets)
-	line.set_meta("connection_velocities", velocities)
-	return offsets
-
-
-func _connection_ribbon_points(a: Vector2, b: Vector2, seed: int, motion_offsets: Array[Vector3] = []) -> Array[Vector3]:
-	var start := Vector3(a.x, 0.10, a.y)
-	var finish := Vector3(b.x, 0.16, b.y)
-	var points: Array[Vector3] = []
-	var distance := a.distance_to(b)
-	var count := _connection_ribbon_point_count(a, b)
-	var wave_cycles := lerpf(1.35, 2.35, clampf((distance - 3.0) / 5.0, 0.0, 1.0))
-	var lateral_scale := lerpf(1.0, 1.55, clampf((distance - 3.0) / 5.0, 0.0, 1.0))
-	for index in range(count):
-		var t := float(index) / float(count - 1)
-		var base := start.lerp(finish, t)
-		var wave := sin(t * TAU * wave_cycles + float(seed) * 0.9)
-		var jitter := sin(float(index * 37 + seed * 11)) * 0.5 + 0.5
-		var end_fade := sin(t * PI)
-		var motion_offset := motion_offsets[index] as Vector3 if index < motion_offsets.size() else Vector3.ZERO
-		base += motion_offset * lateral_scale
-		base.y += (wave * 0.46 + end_fade * 0.34) * end_fade * lateral_scale
-		base.z += cos(t * TAU * (wave_cycles + 0.35)) * lerpf(0.36, 0.64, jitter) * end_fade * lateral_scale
-		points.append(base)
-	return points
-
-
-func _connection_offset_points(points: Array[Vector3], offset: Vector3) -> Array[Vector3]:
-	var offset_points: Array[Vector3] = []
-	for point in points:
-		offset_points.append(point + offset)
-	return offset_points
-
-
-func _connection_ribbon_mesh(points: Array[Vector3], width: float) -> ArrayMesh:
-	var verts := PackedVector3Array()
-	var indices := PackedInt32Array()
-	for index in range(points.size()):
-		var current := points[index]
-		var previous := points[maxi(0, index - 1)]
-		var next := points[mini(points.size() - 1, index + 1)]
-		var tangent := (next - previous).normalized()
-		var side := tangent.cross(Vector3.UP).normalized()
-		if side.is_zero_approx():
-			side = Vector3.RIGHT
-		var twist := sin(float(index) * 1.73 + width * 19.0) * 0.35
-		side = side.rotated(tangent, twist)
-		var local_width := width * (0.82 + 0.24 * sin(float(index) * 1.11 + 0.4))
-		verts.append(current - side * local_width * 0.5)
-		verts.append(current + side * local_width * 0.5)
-		if index < points.size() - 1:
-			var base := index * 2
-			indices.append_array([base, base + 1, base + 2, base + 1, base + 3, base + 2])
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return mesh
 
 
 func _local_offset_to_world(node: Node3D, local_offset: Vector2) -> Vector2:
