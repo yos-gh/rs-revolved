@@ -3169,19 +3169,21 @@ func _play_turret_remnant_collapse(enemy: Dictionary, order: int) -> void:
 	tween.tween_callback(_detonate_turret_remnant.bind(node, line, pos, radius, color))
 
 
-func _set_connection_grow(value: float, line: Node3D) -> void:
+# Tween-bound nodes stay Variant: a typed parameter rejects a node freed mid-tween before
+# the is_instance_valid guard runs, and the tweener reports a conversion error every step.
+func _set_connection_grow(value: float, line: Variant) -> void:
 	if is_instance_valid(line):
 		line.set_meta("connection_grow", value)
 
 
-func _crumble_remnant_line(value: float, line: Node3D, core_pos: Vector2, pos: Vector2) -> void:
+func _crumble_remnant_line(value: float, line: Variant, core_pos: Vector2, pos: Vector2) -> void:
 	if not is_instance_valid(line):
 		return
 	line.set_meta("connection_cut", value)
 	boss._update_connection_line(line, core_pos, pos, 1.0 / 60.0)
 
 
-func _detonate_turret_remnant(node: Node3D, line: Node3D, pos: Vector2, radius: float, color: Color) -> void:
+func _detonate_turret_remnant(node: Variant, line: Variant, pos: Vector2, radius: float, color: Color) -> void:
 	sfx.play("bomb_m")
 	_spawn_enemy_destroy_effect(pos, palette.boss_core, radius, color, 0.20)
 	if is_instance_valid(line):
