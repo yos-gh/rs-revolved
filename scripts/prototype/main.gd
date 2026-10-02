@@ -3328,10 +3328,8 @@ func _boss_core_wire_sphere(color: Color) -> Node3D:
 	_mark_wire_sphere_line(equator, wire_color, 0.30, 0.82)
 	shell.add_child(equator)
 	for half_sign: float in [1.0, -1.0]:
-		# Each hemisphere is its own node so the cage can split open along the equator.
 		var half := Node3D.new()
 		half.name = "boss-core-wire-upper" if half_sign > 0.0 else "boss-core-wire-lower"
-		half.set_meta("cage_half_sign", half_sign)
 		shell.add_child(half)
 		for longitude_index in range(6):
 			var longitude := _boss_core_arc_mesh(radius, 0.020, 0.0, PI * 0.5, wire_color, 0.22, 0.60)

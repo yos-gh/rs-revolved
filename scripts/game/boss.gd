@@ -22,9 +22,6 @@ const CORE_LOCKED_WIRE_ALPHA_MIN := 0.105
 const CORE_LOCKED_WIRE_ALPHA_MAX := 0.245
 const CORE_LOCKED_WIRE_EMISSION_MIN := 0.28
 const CORE_LOCKED_WIRE_EMISSION_MAX := 0.82
-# The cage's hemispheres slide apart along its own axis once the core is exposed.
-const CORE_CAGE_OPEN_DISTANCE := 0.26
-const CORE_CAGE_OPEN_SPEED := 0.9
 const TURRET_FACE_HIT_ALPHA_GAIN := 0.20
 const TURRET_FACE_HIT_EMISSION := 1.45
 const TURRET_DAMAGE_FLASH_DECAY := 20.0
@@ -143,7 +140,6 @@ func _update_core(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_m
 		wire_sphere.rotate_y(delta * CORE_WIRE_ROTATION_SPEED.y)
 		wire_sphere.rotate_z(delta * CORE_WIRE_ROTATION_SPEED.z)
 		_update_core_wire_sphere_visual(wire_sphere, enemy.damageable)
-		_update_core_cage_opening(wire_sphere, enemy.damageable, delta)
 	_update_core_damage_visual(enemy, delta)
 	for ring_cw in enemy.get("rings_cw", []):
 		_update_core_ring(ring_cw as Node3D, delta, CORE_RING_CW_SPEED)
@@ -218,14 +214,6 @@ func _update_core_wire_sphere_visual(wire_sphere: Node3D, damageable: bool) -> v
 		)
 		material.set_shader_parameter("line_color", locked_color)
 		material.set_shader_parameter("emission_strength", randf_range(CORE_LOCKED_WIRE_EMISSION_MIN, CORE_LOCKED_WIRE_EMISSION_MAX))
-
-
-func _update_core_cage_opening(wire_sphere: Node3D, damageable: bool, delta: float) -> void:
-	for half in wire_sphere.get_children():
-		if not half.has_meta("cage_half_sign"):
-			continue
-		var target: float = (half.get_meta("cage_half_sign") as float) * CORE_CAGE_OPEN_DISTANCE if damageable else 0.0
-		half.position.y = move_toward(half.position.y, target, delta * CORE_CAGE_OPEN_SPEED)
 
 
 func _update_core_ring(ring: Node3D, delta: float, fallback_speed: float) -> void:
