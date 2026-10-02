@@ -89,3 +89,10 @@ schema_version=4
 options/dsn="https://eef95ee4ff4d2439011e7e4fc7ce2a59@o4511784787771392.ingest.us.sentry.io/4511784806121472"
 options/enable_metrics=false
 godot_logger/logs=15
+
+[shader_globals]
+
+afterimage_vanish={
+"type": "vec2",
+"value": Vector2(0, 0)
+}

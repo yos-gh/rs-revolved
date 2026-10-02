@@ -158,6 +158,18 @@ const PLAYER_PLATE_SHADOW_ALPHA := 0.20
 const TUNNEL_SHADOW_HEIGHT := 0.035
 const TUNNEL_SHADOW_CENTER_SCALE := 0.36
 const TUNNEL_SHADOW_EDGE_SCALE := 1.85
+# Afterimage on the tunnel, after the original's shadow(): a 0.4x copy at half alpha,
+# pulled a third of the way toward the vanishing point and drawn on the background layer.
+const AFTERIMAGE_ENABLED := true
+const AFTERIMAGE_SCALE := 0.4
+const AFTERIMAGE_PULL := 1.0 / 3.0
+const AFTERIMAGE_ALPHA := 0.5
+const AFTERIMAGE_CULL_MARGIN := 40.0
+const AFTERIMAGE_MIX_SHADER := preload("res://assets/shaders/afterimage_mix.gdshader")
+const AFTERIMAGE_ADD_SHADER := preload("res://assets/shaders/afterimage_add.gdshader")
+# Tunnel blur is 0.7 (near) .. 2.4 px (far); afterimages blur on their own pass.
+const AFTERIMAGE_NEAR_BLUR_PX := 2.0
+const AFTERIMAGE_FAR_BLUR_PX := 3.6
 const SCANLINE_COUNT := 11
 const SPAWN_EFFECT_TIME := 0.50
 const PLAYER_EXTEND_VISUAL_HEIGHT := 1.05
@@ -370,6 +382,10 @@ var aim_reticle_fire_blend := 0.0
 var aim_reticle_applied_blend := -1.0
 var shared_unit_box_mesh: BoxMesh
 var player_shadow: Node3D
+var afterimage_dof: BackgroundDepthOfField
+var effect_afterimages: Array[Dictionary] = []
+var afterimage_vanish := Vector2.ZERO
+var _afterimage_materials := {}
 var aim_reticle_timer := 0.0
 var backfire_timer := 0.0
 var player_spawn_effect_timer := 0.0
@@ -463,6 +479,7 @@ func _process(delta: float) -> void:
 	_update_player_aim()
 	_update_aim_reticle(delta)
 	_update_background_tunnel(delta)
+	_update_effect_afterimages()
 	_update_focus_reticle(delta)
 	if not game_state.game_started:
 		_update_bullet_time_glitch(delta)
@@ -751,6 +768,11 @@ func _setup_background_tunnel() -> void:
 	background_dof = BackgroundDofUtil.new()
 	add_child(background_dof)
 	background_dof.setup(camera, world_environment.environment, TUNNEL_VISUAL_HEIGHT - BACKGROUND_DEPTH_DROP, TUNNEL_NEAR_RADIUS)
+	if AFTERIMAGE_ENABLED:
+		afterimage_dof = BackgroundDofUtil.new()
+		add_child(afterimage_dof)
+		afterimage_dof.setup(camera, world_environment.environment, TUNNEL_SHADOW_HEIGHT - BACKGROUND_DEPTH_DROP, TUNNEL_NEAR_RADIUS, BackgroundDofUtil.AFTERIMAGE_LAYER)
+		afterimage_dof.set_blur(AFTERIMAGE_NEAR_BLUR_PX, AFTERIMAGE_FAR_BLUR_PX)
 
 
 func _create_line_multimesh(instance_count: int, material: Material) -> MultiMesh:
@@ -831,7 +853,11 @@ func _update_background_tunnel(delta: float) -> void:
 			radial_index += 1
 	tunnel_ring_multimesh.buffer = ring_buffer
 	tunnel_radial_multimesh.buffer = radial_buffer
-	background_dof.update_focus(_tunnel_center_at(0.0), TUNNEL_BASE_SQUASH)
+	afterimage_vanish = _tunnel_center_at(0.0)
+	background_dof.update_focus(afterimage_vanish, TUNNEL_BASE_SQUASH)
+	RenderingServer.global_shader_parameter_set("afterimage_vanish", afterimage_vanish)
+	if afterimage_dof != null:
+		afterimage_dof.update_focus(afterimage_vanish, TUNNEL_BASE_SQUASH)
 
 
 func _update_tunnel_points() -> void:
@@ -1131,15 +1157,80 @@ func _spawn_player_shot(pos: Vector2, angle: float) -> void:
 	sfx.play("shot")
 
 
+# Debris afterimages: each piece gets a child copy whose shader maps it onto the tunnel, so
+# pieces map one by one like the original's per-sprite shadows. Only fading material alpha
+# is copied per frame (a few materials per burst), never per-piece transforms.
+func _add_effect_afterimage(source: Node3D) -> void:
+	if not AFTERIMAGE_ENABLED:
+		return
+	var live_materials := {}
+	_attach_effect_afterimages(source, live_materials)
+	if not live_materials.is_empty():
+		effect_afterimages.append({"source": source, "materials": live_materials.values()})
+
+
+func _attach_effect_afterimages(node: Node, live_materials: Dictionary) -> void:
+	for child in node.get_children():
+		_attach_effect_afterimages(child, live_materials)
+	var mesh := node as MeshInstance3D
+	if mesh == null or mesh.mesh == null:
+		return
+	var source_mat := mesh.material_override
+	var after_mat: Material
+	if source_mat is BaseMaterial3D:
+		var key := source_mat.get_instance_id()
+		if not live_materials.has(key):
+			# Additive so thin debris reads as light on the tunnel instead of a dull dark tint.
+			live_materials[key] = [source_mat, _new_afterimage_material(AFTERIMAGE_ADD_SHADER, (source_mat as BaseMaterial3D).albedo_color)]
+		after_mat = live_materials[key][1]
+	else:
+		after_mat = _afterimage_material(source_mat)
+	node.add_child(_afterimage_clone(mesh.mesh, after_mat))
+
+
+func _update_effect_afterimages() -> void:
+	for i in range(effect_afterimages.size() - 1, -1, -1):
+		var entry: Dictionary = effect_afterimages[i]
+		if not is_instance_valid(entry.source) or (entry.source as Node3D).is_queued_for_deletion():
+			effect_afterimages.remove_at(i)
+			continue
+		for pair in entry.materials:
+			var color: Color = (pair[0] as BaseMaterial3D).albedo_color
+			color.a *= AFTERIMAGE_ALPHA
+			(pair[1] as ShaderMaterial).set_shader_parameter("color", color)
+
+
+func _afterimage_clone(mesh: Mesh, material: Material) -> MeshInstance3D:
+	var clone := MeshInstance3D.new()
+	clone.name = "Afterimage"
+	clone.mesh = mesh
+	clone.material_override = material
+	clone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# The shader moves the copy toward the vanishing point, away from the source's bounds.
+	clone.extra_cull_margin = AFTERIMAGE_CULL_MARGIN
+	BackgroundDofUtil.assign_layer(clone, BackgroundDofUtil.AFTERIMAGE_LAYER)
+	return clone
+
+
 func _setup_player_shadow() -> void:
 	player_shadow = null
+	if not AFTERIMAGE_ENABLED:
+		return
+	var hit_preview := player.get_node_or_null("HitAxisPreview")
+	if hit_preview != null:
+		hit_preview.set_meta("skip_model_shadow", true)
+	player_shadow = Node3D.new()
+	player_shadow.name = "PlayerAfterimage"
+	_clone_shadow_children(player, player_shadow, null)
+	add_child(player_shadow)
 
 
 func _update_player_shadow() -> void:
 	if player_shadow == null or not is_instance_valid(player_shadow):
 		return
-	player_shadow.visible = game_state.game_started and player.alive
-	player_shadow.transform = _tunnel_shadow_transform(player.pos, player.rotation.y, player.scale)
+	player_shadow.visible = game_state.game_started and player.alive and player.visible
+	_sync_model_shadow(player_shadow)
+	player_shadow.transform = _afterimage_transform(player.pos, player.transform)
 
 
 func _set_player_shadow_visible(value: bool) -> void:
@@ -3121,6 +3212,8 @@ func _ensure_enemy_visual_batch(kind: String) -> Dictionary:
 		"visual_entries": _create_enemy_visual_batch_entries(kind, "Visual", visual_parts, null),
 		"shadow_entries": [],
 	}
+	if AFTERIMAGE_ENABLED:
+		_add_enemy_batch_afterimages(kind, visual_parts, batch.visual_entries)
 	enemy_visual_batches[kind] = batch
 	template.free()
 	return batch
@@ -3155,6 +3248,28 @@ func _enemy_visual_batch_template(kind: String) -> Node3D:
 	return Node3D.new()
 
 
+# Afterimages draw the visual batch's own MultiMesh again with a mapping shader, so they cost
+# one extra draw per part and no per-enemy script work.
+func _add_enemy_batch_afterimages(kind: String, parts: Array[Dictionary], visual_entries: Array[Dictionary]) -> void:
+	for part_index in range(parts.size()):
+		var part := parts[part_index]
+		if bool(part.get("skip_shadow", false)):
+			continue
+		var source_material := _afterimage_material(part.material) as ShaderMaterial
+		if source_material == null:
+			continue
+		var material := source_material.duplicate() as ShaderMaterial
+		material.set_shader_parameter("local_inv", Projection((part.transform as Transform3D).affine_inverse()))
+		var instance := MultiMeshInstance3D.new()
+		instance.name = "%sAfterimageBatch%02d" % [kind, part_index]
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.multimesh = visual_entries[part_index].multimesh
+		instance.material_override = material
+		instance.extra_cull_margin = AFTERIMAGE_CULL_MARGIN
+		BackgroundDofUtil.assign_layer(instance, BackgroundDofUtil.AFTERIMAGE_LAYER)
+		enemy_visual_batch_root.add_child(instance)
+
+
 func _enemy_shadow_plate_batch_part(kind: String) -> Dictionary:
 	return {
 		"mesh": _enemy_shadow_plate_mesh(kind),
@@ -3167,13 +3282,15 @@ func _collect_enemy_visual_batch_parts(
 	node: Node,
 	parent_transform: Transform3D,
 	parts: Array[Dictionary],
-	include_shadowless: bool
+	include_shadowless: bool,
+	skip_shadow := false
 ) -> void:
 	var node_3d := node as Node3D
 	var current_transform := parent_transform
 	if node_3d != null:
 		current_transform = parent_transform * node_3d.transform
-		if not include_shadowless and bool(node_3d.get_meta("skip_model_shadow", false)):
+		skip_shadow = skip_shadow or bool(node_3d.get_meta("skip_model_shadow", false))
+		if not include_shadowless and skip_shadow:
 			return
 	var mesh_instance := node as MeshInstance3D
 	if mesh_instance != null and mesh_instance.mesh != null:
@@ -3181,9 +3298,10 @@ func _collect_enemy_visual_batch_parts(
 			"mesh": mesh_instance.mesh,
 			"material": mesh_instance.material_override,
 			"transform": current_transform,
+			"skip_shadow": skip_shadow,
 		})
 	for child in node.get_children():
-		_collect_enemy_visual_batch_parts(child, current_transform, parts, include_shadowless)
+		_collect_enemy_visual_batch_parts(child, current_transform, parts, include_shadowless, skip_shadow)
 
 
 func _create_enemy_visual_batch_entries(
@@ -3222,6 +3340,9 @@ func _clear_enemy_visual_batches() -> void:
 
 
 func _update_enemy_visual_batches() -> void:
+	for enemy in enemies:
+		if enemy.get("shadow") != null:
+			_update_enemy_shadow(enemy)
 	if enemy_visual_batches.is_empty():
 		return
 	var grouped := {}
@@ -3274,8 +3395,52 @@ func _enemy_batch_local_visual_transform(enemy: Dictionary) -> Transform3D:
 
 
 func _enemy_batch_shadow_transform(enemy: Dictionary) -> Transform3D:
-	var node := enemy.node as Node3D
-	return _tunnel_shadow_transform(enemy.pos, node.rotation.y, node.scale)
+	return _afterimage_transform(enemy.pos, _enemy_batch_visual_transform(enemy))
+
+
+func _afterimage_transform(logical_pos: Vector2, visual: Transform3D) -> Transform3D:
+	var pos := logical_pos.lerp(afterimage_vanish, AFTERIMAGE_PULL)
+	return Transform3D(visual.basis.scaled(Vector3.ONE * AFTERIMAGE_SCALE), _to_world(pos, TUNNEL_SHADOW_HEIGHT - BACKGROUND_DEPTH_DROP))
+
+
+# Copies the source's flat colour at reduced alpha into an afterimage shader. Mapped copies are
+# shrunk and pulled by the shader itself; unmapped ones are already placed by script.
+func _afterimage_material(source: Material, mapped := true) -> Material:
+	if source == null:
+		return null
+	var key := "%d:%s" % [source.get_instance_id(), mapped]
+	if _afterimage_materials.has(key):
+		return _afterimage_materials[key]
+	var color := Color.TRANSPARENT
+	var additive := false
+	var shader_mat := source as ShaderMaterial
+	if shader_mat != null:
+		for param in ["face_color", "line_color"]:
+			var value = shader_mat.get_shader_parameter(param)
+			if value is Color:
+				color = value
+		additive = shader_mat.shader == VisualMaterialsUtil.EMISSIVE_OUTLINE_SHADER
+	var std_mat := source as BaseMaterial3D
+	if std_mat != null:
+		color = std_mat.albedo_color
+		additive = std_mat.blend_mode == BaseMaterial3D.BLEND_MODE_ADD
+	var mat := _new_afterimage_material(AFTERIMAGE_ADD_SHADER if additive else AFTERIMAGE_MIX_SHADER, color)
+	if not mapped:
+		mat.set_shader_parameter("pull", 0.0)
+		mat.set_shader_parameter("shrink", 1.0)
+	_afterimage_materials[key] = mat
+	return mat
+
+
+func _new_afterimage_material(shader: Shader, color: Color) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	color.a *= AFTERIMAGE_ALPHA
+	mat.set_shader_parameter("color", color)
+	mat.set_shader_parameter("pull", AFTERIMAGE_PULL)
+	mat.set_shader_parameter("shrink", AFTERIMAGE_SCALE)
+	mat.set_shader_parameter("height", TUNNEL_SHADOW_HEIGHT - BACKGROUND_DEPTH_DROP)
+	return mat
 
 
 func _clear_hostile_bullets() -> void:
@@ -3298,6 +3463,7 @@ func _spawn_boss_core() -> void:
 	enemy.rings_cw = node.find_children("boss-core-ring-cw*", "Node3D", true, false)
 	enemy.rings_ccw = node.find_children("boss-core-ring-ccw*", "Node3D", true, false)
 	enemy.gun_orbit = node.find_child("boss-core-gun-orbit", true, false)
+	enemy.shadow = _create_model_afterimage(node, "BossCoreAfterimage")
 	enemies.append(enemy)
 
 
@@ -3572,6 +3738,7 @@ func _spawn_boss_turret(kind: String) -> void:
 	enemy.direction_guns = node.find_children("boss-t2-direction-gun*", "Node3D", true, false)
 	enemy.emitters = node.find_children("boss-t3-emitter*", "Node3D", true, false)
 	enemy.muzzle_glints = node.find_children("boss-t-muzzle-glint", "MeshInstance3D", true, false)
+	enemy.shadow = _create_model_afterimage(node, "%sAfterimage" % kind)
 	_lock_spawn_collision(enemy)
 	enemies.append(enemy)
 
@@ -4092,6 +4259,7 @@ func _spawn_enemy_destroy_effect(pos: Vector2, color: Color, radius: float, acce
 		tween.parallel().tween_property(piece, "scale", Vector3(randf_range(0.45, 0.85), 0.18, randf_range(0.45, 0.85)), duration)
 	burst.position = _to_world(pos, 0.0)
 	add_child(burst)
+	_add_effect_afterimage(burst)
 	var fade := create_tween()
 	var fade_duration := 0.76 * clampf(sqrt(size_factor), 0.85, 1.45)
 	fade.parallel().tween_property(shard_mat, "albedo_color", Color(color.r, color.g, color.b, 0.0), fade_duration)
@@ -4449,6 +4617,7 @@ func _spawn_boss_destroy_effect(pos: Vector2, color: Color, source_node: Node3D 
 		tween.tween_property(piece, "position", _to_world(dir * target_distance, target_height), duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tween.parallel().tween_property(piece, "rotation", piece.rotation + Vector3(randf_range(-5.2, 5.2), randf_range(4.0, 9.5), randf_range(-5.2, 5.2)), duration)
 		tween.parallel().tween_property(piece, "scale", Vector3(randf_range(0.55, 1.25), randf_range(0.12, 0.40), randf_range(0.55, 1.25)), duration)
+	_add_effect_afterimage(root)
 	var fade := create_tween()
 	fade.tween_interval(BOSS_DESTROY_ANTICIPATION_TIME)
 	fade.tween_property(plate_mat, "albedo_color", Color(color.r, color.g, color.b, 0.0), 1.08)
@@ -4502,6 +4671,7 @@ func _spawn_player_burst(pos: Vector2) -> void:
 		tween.parallel().tween_property(chunk, "scale", Vector3(0.32, 0.32, 0.32), 0.50)
 	burst.position = _to_world(pos, 0.0)
 	add_child(burst)
+	_add_effect_afterimage(burst)
 	var fade := create_tween()
 	fade.parallel().tween_property(plate_mat, "albedo_color", Color(palette.player_core.r, palette.player_core.g, palette.player_core.b, 0.0), 0.52)
 	fade.parallel().tween_property(chunk_mat, "albedo_color", Color(palette.player.r, palette.player.g, palette.player.b, 0.0), 0.50)
@@ -4710,6 +4880,16 @@ func _set_node_alpha(node: Node, alpha: float) -> void:
 		_set_node_alpha(child, alpha)
 
 
+func _create_model_afterimage(source: Node3D, afterimage_name: String) -> Node3D:
+	if not AFTERIMAGE_ENABLED:
+		return null
+	var afterimage := Node3D.new()
+	afterimage.name = afterimage_name
+	_clone_shadow_children(source, afterimage, null)
+	add_child(afterimage)
+	return afterimage
+
+
 func _create_model_shadow(source: Node3D, shadow_name: String, alpha: float) -> Node3D:
 	var shadow := Node3D.new()
 	shadow.name = shadow_name
@@ -4823,7 +5003,8 @@ func _soft_flat_polygon_mesh(points: Array[Vector2]) -> ArrayMesh:
 	return mesh
 
 
-func _clone_shadow_children(source: Node, target: Node, shadow_material: StandardMaterial3D) -> void:
+# A null shadow_material clones each part as a translucent afterimage on the background layer.
+func _clone_shadow_children(source: Node, target: Node, shadow_material: Material) -> void:
 	for child in source.get_children():
 		var child_3d := child as Node3D
 		if child_3d == null:
@@ -4836,6 +5017,10 @@ func _clone_shadow_children(source: Node, target: Node, shadow_material: Standar
 			var mesh_clone := MeshInstance3D.new()
 			mesh_clone.mesh = child_mesh.mesh
 			mesh_clone.material_override = shadow_material
+			if shadow_material == null:
+				# Placed by script each frame, so its shader only flattens it onto the tunnel.
+				mesh_clone.material_override = _afterimage_material(child_mesh.material_override, false)
+				BackgroundDofUtil.assign_layer(mesh_clone, BackgroundDofUtil.AFTERIMAGE_LAYER)
 			mesh_clone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			clone = mesh_clone
 		else:
@@ -4859,6 +5044,9 @@ func _sync_model_shadow(shadow: Node3D) -> void:
 			if source != null and is_instance_valid(source):
 				clone.transform = source.transform
 				clone.visible = source.visible
+				var source_mesh := source as MeshInstance3D
+				if source_mesh != null:
+					(clone as MeshInstance3D).mesh = source_mesh.mesh
 		_sync_model_shadow(clone)
 
 
@@ -4868,7 +5056,8 @@ func _update_enemy_shadow(enemy: Dictionary) -> void:
 		return
 	if not bool(shadow.get_meta("enemy_plate_shadow", false)):
 		_sync_model_shadow(shadow)
-	shadow.transform = _tunnel_shadow_transform(enemy.pos, enemy.node.rotation.y, enemy.node.scale)
+	shadow.visible = (enemy.node as Node3D).visible
+	shadow.transform = _afterimage_transform(enemy.pos, enemy.node.transform)
 
 
 func _free_enemy_nodes(enemy: Dictionary) -> void:

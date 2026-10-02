@@ -8,6 +8,8 @@ extends Node3D
 const DOF_SHADER := preload("res://assets/shaders/background_dof.gdshader")
 
 const BACKGROUND_LAYER := 1 << 19
+# Afterimages get their own pass so they can blur more than the tunnel.
+const AFTERIMAGE_LAYER := 1 << 18
 const QUAD_SIZE := 400.0
 
 var viewport: SubViewport
@@ -17,10 +19,10 @@ var material: ShaderMaterial
 var _source_camera: Camera3D
 
 
-func setup(source_camera: Camera3D, source_environment: Environment, height: float, near_radius: float) -> void:
-	name = "BackgroundDepthOfField"
+func setup(source_camera: Camera3D, source_environment: Environment, height: float, near_radius: float, layer := BACKGROUND_LAYER) -> void:
+	name = "BackgroundDepthOfField" if layer == BACKGROUND_LAYER else "AfterimageDepthOfField"
 	_source_camera = source_camera
-	_source_camera.cull_mask &= ~BACKGROUND_LAYER
+	_source_camera.cull_mask &= ~layer
 
 	viewport = SubViewport.new()
 	viewport.name = "BackgroundViewport"
@@ -35,7 +37,7 @@ func setup(source_camera: Camera3D, source_environment: Environment, height: flo
 	environment.glow_enabled = false
 	camera = Camera3D.new()
 	camera.name = "BackgroundCamera"
-	camera.cull_mask = BACKGROUND_LAYER
+	camera.cull_mask = layer
 	camera.environment = environment
 	viewport.add_child(camera)
 
@@ -55,8 +57,13 @@ func setup(source_camera: Camera3D, source_environment: Environment, height: flo
 	_sync_camera()
 
 
-static func assign_layer(instance: VisualInstance3D) -> void:
-	instance.layers = BACKGROUND_LAYER
+static func assign_layer(instance: VisualInstance3D, layer := BACKGROUND_LAYER) -> void:
+	instance.layers = layer
+
+
+func set_blur(near_px: float, far_px: float) -> void:
+	material.set_shader_parameter("near_blur_px", near_px)
+	material.set_shader_parameter("far_blur_px", far_px)
 
 
 func update_focus(vanish_point: Vector2, ring_squash: float) -> void:
