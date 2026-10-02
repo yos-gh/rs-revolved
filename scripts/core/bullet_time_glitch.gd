@@ -11,6 +11,7 @@ const BEATS_PER_BAR := 4
 const BEATS_PER_RING := 2
 const OFFBEAT_PULSE := 0.5
 const PULSE_DECAY := 8.0
+const KICK_DECAY := 5.0
 
 # Radii are in screen heights. Colour-only effects fade in from CLEAR_RADIUS; effects
 # that move pixels stay off until SHIFT_CLEAR_RADIUS so nearby threats keep their position.
@@ -28,6 +29,7 @@ var _free_beat := 0.0
 var _last_beat_index := -1
 var _beat_env := 0.0
 var _ring_age := 10.0
+var _kick := 0.0
 var _rng := RandomNumberGenerator.new()
 var _post_material: ShaderMaterial
 
@@ -48,18 +50,21 @@ func _ready() -> void:
 
 # `beat_position` is the BGM position in beats (negative when no music is playing) and
 # `beat_seconds` its beat length, so pulses land on the soundtrack's own tempo.
-func update_effect(delta: float, player_pos: Vector2, target_intensity: float, beat_position := -1.0, beat_seconds := FALLBACK_BEAT_SECONDS, darken := 1.0, chaos := 0.0) -> void:
+func update_effect(delta: float, player_pos: Vector2, target_intensity: float, beat_position := -1.0, beat_seconds := FALLBACK_BEAT_SECONDS, darken := 1.0, chaos := 0.0, tunnel := 0.0) -> void:
 	_sync_viewport_rect()
 	player_screen_pos = player_pos
 	intensity = lerpf(intensity, clampf(target_intensity, 0.0, 1.0), minf(1.0, delta * 8.0))
 	_time += delta
 	_update_beat(delta, beat_position, beat_seconds)
+	_kick = maxf(0.0, _kick - delta * KICK_DECAY)
 	visible = intensity > MIN_VISIBLE_INTENSITY
 	if not visible:
 		return
 	_post_material.set_shader_parameter("intensity", intensity)
 	_post_material.set_shader_parameter("darken", darken)
 	_post_material.set_shader_parameter("chaos", chaos)
+	_post_material.set_shader_parameter("tunnel", tunnel)
+	_post_material.set_shader_parameter("kick", _kick)
 	_post_material.set_shader_parameter("time", _time)
 	_post_material.set_shader_parameter("canvas_size", size)
 	_post_material.set_shader_parameter("focus_px", player_screen_pos)
@@ -67,6 +72,13 @@ func update_effect(delta: float, player_pos: Vector2, target_intensity: float, b
 	_post_material.set_shader_parameter("ring_age", _ring_age)
 	_post_material.set_shader_parameter("burst", _burst)
 	_post_material.set_shader_parameter("burst_seed", _burst_seed)
+
+
+# A one-off impact: the periphery flips negative and the glitch bursts all at once.
+func kick() -> void:
+	_kick = 1.0
+	_burst = 1.0
+	_burst_seed = _rng.randf() * 100.0
 
 
 func _update_beat(delta: float, beat_position: float, beat_seconds: float) -> void:

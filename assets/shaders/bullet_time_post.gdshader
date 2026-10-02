@@ -23,8 +23,13 @@ uniform float shift_soft_radius = 0.30;
 uniform float darken = 1.0;
 // Extra tearing for the life/death glitch: more and wider slices, more and bigger blocks.
 uniform float chaos = 0.0;
+// Tunnel vision for the life/death moments: zoom blur toward the ship and RGB split that
+// both grow toward the screen edge. Bullet time leaves it at 0 to keep the wires sharp.
+uniform float tunnel = 0.0;
+// Game-start impact: the periphery flashes negative for an instant.
+uniform float kick = 0.0;
 
-const int ZOOM_TAPS = 5;
+const int ZOOM_TAPS = 8;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const vec3 SHADOW_TINT = vec3(0.03, 0.17, 0.24);
 const vec3 HIGHLIGHT_TINT = vec3(0.92, 0.96, 1.0);
@@ -105,8 +110,9 @@ void fragment() {
 	uv = mix(uv, cell_uv, block_on);
 
 	// Radial zoom blur toward the player plus spectral chromatic aberration.
-	float blur = shift_amt * (0.010 + 0.016 * beat_env);
-	float ca = amt * (0.0025 + 0.006 * edge + 0.004 * beat_env) + slice_on * shift_mask * 0.004 * (1.0 + burst);
+	float tunnel_edge = tunnel * smoothstep(0.10, 0.85, dist);
+	float blur = shift_amt * (0.010 + 0.016 * beat_env) + tunnel_edge * (0.07 + 0.05 * kick);
+	float ca = amt * (0.0025 + 0.006 * edge + 0.004 * beat_env) + slice_on * shift_mask * 0.004 * (1.0 + burst) + tunnel_edge * 0.016;
 	vec2 rel = uv - focus_uv;
 	vec3 col = vec3(0.0);
 	float wsum = 0.0;
@@ -145,5 +151,8 @@ void fragment() {
 		hash21(local_px + fract(time) * 97.0 + 41.0)) - 0.5;
 	col += mix(vec3(grain.g), grain, 0.5) * 0.10 * amt;
 
-	COLOR = vec4(clamp(col, 0.0, 1.0), 1.0);
+	col = clamp(col, 0.0, 1.0);
+	col = mix(col, vec3(1.0) - col, kick * 0.85 * smoothstep(0.10, 0.40, dist));
+
+	COLOR = vec4(col, 1.0);
 }

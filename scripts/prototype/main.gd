@@ -19,6 +19,7 @@ const SpawnerUtil := preload("res://scripts/game/spawner.gd")
 const BossUtil := preload("res://scripts/game/boss.gd")
 const ModelGalleryUtil := preload("res://scripts/gallery/model_gallery.gd")
 const GameHudUtil := preload("res://scripts/ui/game_hud.gd")
+const FocusReticleUtil := preload("res://scripts/ui/focus_reticle.gd")
 const BitmapNumberUtil := preload("res://scripts/ui/bitmap_number.gd")
 const SCORE_ATLAS := preload("res://assets/ui/original_svg/score.svg")
 const MENU_ATLAS := preload("res://assets/ui/original_svg/menu.svg")
@@ -269,6 +270,10 @@ const ENTRY_GLITCH := 0.95
 const GAME_OVER_GLITCH := 0.75
 const GAME_OVER_GLITCH_DELAY := 0.9
 const GAME_OVER_GLITCH_RISE := 2.2
+# The game start lingers longer than a respawn: the ship gathers in more slowly and the
+# first enemies hold back by the same margin.
+const ENTRY_EFFECT_TIME := 1.0
+const ENTRY_SPAWN_HOLD := 0.5
 const MENU_ROW_HEIGHT := 14
 const UI_SVG_SCALE := 4.0
 const TITLE_VOID_SIDE_CROP := 4
@@ -359,6 +364,7 @@ var player_shadow: Node3D
 var aim_reticle_timer := 0.0
 var backfire_timer := 0.0
 var player_spawn_effect_timer := 0.0
+var player_spawn_effect_length := SPAWN_EFFECT_TIME
 var title_layer: CanvasLayer
 var title_shade: ColorRect
 var title_band: ColorRect
@@ -392,6 +398,7 @@ var web_right_mouse_down := false
 var web_pointer_callback
 var web_context_menu_callback
 var hud: GameHud
+var focus_reticle: FocusReticle
 
 
 func _ready() -> void:
@@ -445,6 +452,7 @@ func _process(delta: float) -> void:
 	_update_player_aim()
 	_update_aim_reticle(delta)
 	_update_background_tunnel(delta)
+	_update_focus_reticle(delta)
 	if not game_state.game_started:
 		_update_bullet_time_glitch(delta)
 		if gallery_active:
@@ -478,6 +486,7 @@ func _process(delta: float) -> void:
 		return
 	if not was_player_alive and player.alive:
 		player_spawn_effect_timer = SPAWN_EFFECT_TIME
+		player_spawn_effect_length = SPAWN_EFFECT_TIME
 		_spawn_player_respawn_effect(player.pos)
 	if player.alive:
 		player.update_motion(sim_delta, FIELD_W, FIELD_H, FIELD_EDGE_MARGIN)
@@ -1268,6 +1277,10 @@ func _setup_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.layer = 2
 	add_child(layer)
+	focus_reticle = FocusReticleUtil.new()
+	focus_reticle.line_color = palette.player
+	focus_reticle.visible = false
+	layer.add_child(focus_reticle)
 	hud = GameHudUtil.new()
 	layer.add_child(hud)
 	hud.setup()
@@ -1936,16 +1949,19 @@ func _reset_runtime_state() -> void:
 	spawner.reset()
 	player.reset()
 	backfire_timer = 0.0
-	player_spawn_effect_timer = SPAWN_EFFECT_TIME
+	player_spawn_effect_timer = ENTRY_EFFECT_TIME
+	player_spawn_effect_length = ENTRY_EFFECT_TIME
+	spawner.set_delay(ENTRY_SPAWN_HOLD)
 	_reset_gum()
 	boss_gum_controller.reset()
 	_clear_enemies()
 	_clear_bullets()
 	# The ship gathers in with the same converging squares as a respawn while the band strips leave.
-	_spawn_player_respawn_effect(player.pos)
+	_spawn_player_respawn_effect(player.pos, ENTRY_EFFECT_TIME - 0.04)
 	entry_glitch = ENTRY_GLITCH
 	if bullet_time_glitch != null:
 		bullet_time_glitch.intensity = ENTRY_GLITCH
+		bullet_time_glitch.kick()
 
 
 func _reset_gum() -> void:
@@ -2336,11 +2352,21 @@ func _update_bullet_time_glitch(delta: float) -> void:
 	var life_glitch := _update_life_glitch(delta)
 	if game_state.game_started and game_state.game_over:
 		screen_pos = camera.unproject_position(_to_world(death_focus, 0.32))
+	elif life_glitch > 0.0:
+		screen_pos = camera.unproject_position(_to_world(player.pos, 0.32))
 	var total := maxf(intensity, life_glitch)
 	var darken := intensity / total if total > 0.001 else 1.0
-	bullet_time_glitch.update_effect(delta, screen_pos, total, bgm.beat_position(), bgm.beat_seconds(), darken, life_glitch)
+	# Tunnel vision rides on the life/death glitch only; bullet time keeps the wires sharp.
+	bullet_time_glitch.update_effect(delta, screen_pos, total, bgm.beat_position(), bgm.beat_seconds(), darken, life_glitch, life_glitch)
 	# Only the bullet-time share bends the music; the life/death glitch stays silent.
 	time_warp_audio.update_effect(bullet_time_glitch.intensity * darken)
+
+
+# The lock-on frame settles in once the ship has fully formed and drops away when it is lost.
+func _update_focus_reticle(delta: float) -> void:
+	var active := game_state.game_started and not game_state.game_over and not game_state.arcade_cleared and player.alive and player_spawn_effect_timer <= 0.0
+	var screen_pos := camera.unproject_position(_to_world(player.pos, 0.32))
+	focus_reticle.update_reticle(delta, delta * game_time_scale, screen_pos, active, bgm.beat_position())
 
 
 func _update_life_glitch(delta: float) -> float:
@@ -2352,7 +2378,7 @@ func _update_life_glitch(delta: float) -> float:
 		return GAME_OVER_GLITCH * smoothstep(GAME_OVER_GLITCH_DELAY, GAME_OVER_GLITCH_DELAY + GAME_OVER_GLITCH_RISE, game_over_age)
 	if entry_glitch > 0.0:
 		# Fades with the ship's grow-in and is gone the moment the ship reaches full size.
-		entry_glitch = ENTRY_GLITCH * clampf(player_spawn_effect_timer / SPAWN_EFFECT_TIME, 0.0, 1.0)
+		entry_glitch = ENTRY_GLITCH * clampf(player_spawn_effect_timer / player_spawn_effect_length, 0.0, 1.0)
 	return entry_glitch
 
 
@@ -4533,7 +4559,7 @@ func _spawn_player_backfire(pos: Vector2, angle: float) -> void:
 	tween.tween_callback(flare.queue_free)
 
 
-func _spawn_player_respawn_effect(pos: Vector2) -> void:
+func _spawn_player_respawn_effect(pos: Vector2, duration := 0.46) -> void:
 	var respawn := Node3D.new()
 	respawn.name = "PlayerRespawnSquares"
 	var mat := _transparent_material(Color(palette.player.r, palette.player.g, palette.player.b, 0.24), 0.76)
@@ -4550,12 +4576,12 @@ func _spawn_player_respawn_effect(pos: Vector2) -> void:
 		plate.rotation.y = angle
 		respawn.add_child(plate)
 		var tween := create_tween()
-		tween.parallel().tween_property(plate, "position", _to_world(dir * 0.18, 0.34), 0.46)
-		tween.parallel().tween_property(plate, "scale", Vector3(0.42, 0.16, 0.42), 0.46)
+		tween.parallel().tween_property(plate, "position", _to_world(dir * 0.18, 0.34), duration)
+		tween.parallel().tween_property(plate, "scale", Vector3(0.42, 0.16, 0.42), duration)
 	respawn.position = _to_world(pos, 0.0)
 	add_child(respawn)
 	var fade := create_tween()
-	fade.parallel().tween_property(mat, "albedo_color", Color(palette.player.r, palette.player.g, palette.player.b, 0.0), 0.46)
+	fade.parallel().tween_property(mat, "albedo_color", Color(palette.player.r, palette.player.g, palette.player.b, 0.0), duration)
 	fade.tween_callback(respawn.queue_free)
 
 
@@ -4574,12 +4600,12 @@ func _effect_line_mesh(a: Vector2, b: Vector2, width: float, material: Material)
 
 func _update_player_spawn_effect(delta: float) -> void:
 	player_spawn_effect_timer = maxf(0.0, player_spawn_effect_timer - delta)
-	var age := SPAWN_EFFECT_TIME - player_spawn_effect_timer
-	_apply_spawn_effect(player, age, 4.0, 0.50)
+	var age := player_spawn_effect_length - player_spawn_effect_timer
+	_apply_spawn_effect(player, age, 4.0, 0.50, player_spawn_effect_length)
 
 
-func _apply_spawn_effect(node: Node3D, age: float, start_scale: float, start_alpha: float) -> void:
-	var t := clampf(age / SPAWN_EFFECT_TIME, 0.0, 1.0)
+func _apply_spawn_effect(node: Node3D, age: float, start_scale: float, start_alpha: float, length := SPAWN_EFFECT_TIME) -> void:
+	var t := clampf(age / length, 0.0, 1.0)
 	node.scale = Vector3.ONE * lerpf(start_scale, 1.0, t)
 	_set_node_alpha(node, lerpf(start_alpha, 1.0, t))
 
