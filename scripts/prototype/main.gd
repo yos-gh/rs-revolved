@@ -399,6 +399,7 @@ var web_pointer_callback
 var web_context_menu_callback
 var hud: GameHud
 var focus_reticle: FocusReticle
+var focus_reticle_last_pos := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -2366,7 +2367,24 @@ func _update_bullet_time_glitch(delta: float) -> void:
 func _update_focus_reticle(delta: float) -> void:
 	var active := game_state.game_started and not game_state.game_over and not game_state.arcade_cleared and player.alive and player_spawn_effect_timer <= 0.0
 	var screen_pos := camera.unproject_position(_to_world(player.pos, 0.32))
-	focus_reticle.update_reticle(delta, delta * game_time_scale, screen_pos, active, bgm.beat_position())
+	# Field-to-screen scale per axis, so threat distances match the drawn ring.
+	var px_per_unit := Vector2(
+		(camera.unproject_position(_to_world(player.pos + Vector2.RIGHT, 0.32)) - screen_pos).length(),
+		(camera.unproject_position(_to_world(player.pos + Vector2.DOWN, 0.32)) - screen_pos).length())
+	var sim_delta := delta * game_time_scale
+	var motion := Vector2.ZERO
+	if sim_delta > 0.0:
+		motion = (player.pos - focus_reticle_last_pos) * px_per_unit / (Player.SPEED * sim_delta * maxf(px_per_unit.x, px_per_unit.y))
+	focus_reticle_last_pos = player.pos
+	# Nearest enemy or hostile bullet, in screen pixels so the alert radii match the frame.
+	var nearest := INF
+	if active:
+		for enemy in enemies:
+			nearest = minf(nearest, ((enemy.pos - player.pos) * px_per_unit).length())
+		for bullet in bullet_manager.bullets:
+			if bullet.hostile:
+				nearest = minf(nearest, ((bullet.pos - player.pos) * px_per_unit).length())
+	focus_reticle.update_reticle(delta, sim_delta, screen_pos, active, bgm.beat_position(), motion, nearest)
 
 
 func _update_life_glitch(delta: float) -> float:
