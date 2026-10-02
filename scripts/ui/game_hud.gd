@@ -7,12 +7,16 @@ const ZANKI_ATLAS := preload("res://assets/ui/original_svg/zanki.svg")
 
 const HUD_MARGIN := 28.0
 const NUMBER_SCALE := 1.25
+const SCORE_POSITION := Vector2(HUD_MARGIN, 28.0)
 const GUM_MIN_RATIO := 0.18
 const TENSION_COLOR := Color(0.50, 0.88, 0.38, 0.88)
 const GUM_COLOR := Color(0.38, 0.50, 0.88, 0.88)
 const GUM_LOW_COLOR := Color(0.88, 0.50, 0.38, 0.90)
 # A brief glow when Gum becomes usable again or a meter tops out.
 const READY_FLASH_TIME := 0.55
+# Topping out Tension is rare and hard won, so its glow lingers and fades.
+const TENSION_FLASH_TIME := 2.4
+const LIFE_FLASH_TIME := 0.8
 # Tension decays every frame, so "full" is a band with hysteresis rather than exactly 1.0.
 const TENSION_FULL_RATIO := 0.995
 const TENSION_REARM_RATIO := 0.90
@@ -30,6 +34,7 @@ var tension_ratio := 0.0
 var gum_flash := 0.0
 var tension_flash := 0.0
 var tension_flash_armed := true
+var life_flash := 0.0
 
 
 func setup() -> void:
@@ -44,7 +49,7 @@ func setup() -> void:
 	tension_track = _add_edge_meter("Tension", false)
 	tension_fill = _add_meter_fill(tension_track, TENSION_COLOR)
 
-	score_digits = _add_bitmap_number(SCORE_ATLAS, Vector2(HUD_MARGIN, 28.0), false, false, NUMBER_SCALE)
+	score_digits = _add_bitmap_number(SCORE_ATLAS, SCORE_POSITION, false, false, NUMBER_SCALE)
 	score_digits.set_number(0, 9, 9)
 
 	debug_label = _add_debug_label()
@@ -61,6 +66,7 @@ func setup() -> void:
 
 	life_digit = _add_bitmap_number(ZANKI_ATLAS, Vector2(-HUD_MARGIN - 30.0 * NUMBER_SCALE, -48.0), true, true, NUMBER_SCALE)
 	life_digit.set_number(0, 1, 1)
+	life_digit.prepare_glow()
 	_update_meter_geometry()
 
 
@@ -76,12 +82,21 @@ func update_values(score: int, _hi_score: int, lives: int, gum_energy: float, te
 	elif tension_flash_armed and next_tension >= TENSION_FULL_RATIO:
 		tension_flash_armed = false
 		tension_flash = 1.0
+	var was_full := _gum_full()
 	gum_ratio = next_gum
 	tension_ratio = next_tension
+	if was_full != _gum_full():
+		queue_redraw()
 	_apply_fill_colors()
 	debug_label.text = debug_text
 	debug_label.visible = not debug_text.is_empty()
 	_update_meter_geometry()
+
+
+func flash_life() -> void:
+	life_flash = 1.0
+	life_digit.set_glow(_flash_curve(life_flash))
+	set_process(true)
 
 
 func _notification(what: int) -> void:
@@ -90,16 +105,28 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
-	if gum_flash <= 0.0 and tension_flash <= 0.0:
+	if life_flash > 0.0:
+		life_flash = maxf(0.0, life_flash - delta / LIFE_FLASH_TIME)
+		life_digit.set_glow(_flash_curve(life_flash))
+	if gum_flash <= 0.0 and tension_flash <= 0.0 and not _gum_full():
 		return
 	gum_flash = maxf(0.0, gum_flash - delta / READY_FLASH_TIME)
-	tension_flash = maxf(0.0, tension_flash - delta / READY_FLASH_TIME)
+	tension_flash = maxf(0.0, tension_flash - delta / TENSION_FLASH_TIME)
 	_apply_fill_colors()
 	queue_redraw()
 
 
+# A full Gum meter keeps glowing until it is spent.
+func _gum_glow() -> float:
+	return 1.0 if _gum_full() else gum_flash
+
+
+func _gum_full() -> bool:
+	return gum_ratio >= 1.0
+
+
 func _apply_fill_colors() -> void:
-	gum_fill.color = GUM_LOW_COLOR if gum_ratio < GUM_MIN_RATIO else _flash_color(GUM_COLOR, gum_flash)
+	gum_fill.color = GUM_LOW_COLOR if gum_ratio < GUM_MIN_RATIO else _flash_color(GUM_COLOR, _gum_glow())
 	tension_fill.color = _flash_color(TENSION_COLOR, tension_flash)
 
 
@@ -116,7 +143,7 @@ func _draw() -> void:
 	if not is_instance_valid(gum_track) or not is_instance_valid(tension_track):
 		return
 	_draw_meter_glow(tension_fill, TENSION_COLOR, tension_flash)
-	_draw_meter_glow(gum_fill, GUM_COLOR, gum_flash)
+	_draw_meter_glow(gum_fill, GUM_COLOR, _gum_glow())
 
 
 func _draw_meter_glow(fill: ColorRect, color: Color, flash: float) -> void:

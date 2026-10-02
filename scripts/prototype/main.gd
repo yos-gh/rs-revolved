@@ -277,6 +277,15 @@ const ENTRY_SPAWN_HOLD := 0.5
 const MENU_ROW_HEIGHT := 14
 const UI_SVG_SCALE := 4.0
 const TITLE_VOID_SIDE_CROP := 4
+const TITLE_ICON_SIZE := 32
+const TITLE_ICON_STRIDE := 36.0
+# Stroke bounds inside the 32px icon image (3px strokes centred on 7..25).
+const TITLE_ICON_INK_TOP := 6
+const TITLE_ICON_INK_RIGHT := 5
+# Measured ink of the HUD digits at 1280x720: score glyphs start 33px from the top,
+# the life digit ends 30px from the right edge.
+const TITLE_ICON_TOP_MARGIN := 33.0
+const TITLE_ICON_RIGHT_MARGIN := 30.0
 
 var palette := {
 	"bg": Color(0.025, 0.055, 0.075),
@@ -370,6 +379,7 @@ var title_shade: ColorRect
 var title_band: ColorRect
 var title_menu_buttons: Array[Button] = []
 var title_hi_score: BitmapNumber
+var title_sound_button: Button
 var title_mode_index := 0
 var title_void_revealed := false
 var title_void_noise_timer := 0.0
@@ -1272,6 +1282,7 @@ func _play_gum_close() -> void:
 func _play_extend() -> void:
 	sfx.play("extend")
 	_spawn_player_extend_effect(player.pos)
+	hud.flash_life()
 
 
 func _setup_hud() -> void:
@@ -1388,30 +1399,14 @@ func _setup_title() -> void:
 	title_hi_score.name = "TitleHiScore"
 	title_hi_score.setup(SCORE_ATLAS, Vector2i(30, 16), 30, 26, GameHudUtil.NUMBER_SCALE)
 	title_hi_score.set_number(int(game_state.hi_score), 9, 9)
-	title_hi_score.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	title_hi_score.offset_left = -GameHudUtil.HUD_MARGIN - title_hi_score.size.x
-	title_hi_score.offset_right = -GameHudUtil.HUD_MARGIN
-	title_hi_score.offset_top = -GameHudUtil.HUD_MARGIN - title_hi_score.size.y
-	title_hi_score.offset_bottom = -GameHudUtil.HUD_MARGIN
+	# Same spot as the in-game score.
+	title_hi_score.position = GameHudUtil.SCORE_POSITION
 	title_layer.add_child(title_hi_score)
 
-	var fullscreen_button := Button.new()
-	fullscreen_button.name = "FullscreenButton"
-	fullscreen_button.icon = _fullscreen_icon_texture()
-	fullscreen_button.flat = true
-	fullscreen_button.focus_mode = Control.FOCUS_NONE
-	fullscreen_button.tooltip_text = "Fullscreen"
-	fullscreen_button.anchor_left = 0.968
-	fullscreen_button.anchor_right = 0.968
-	fullscreen_button.anchor_top = 0.032
-	fullscreen_button.anchor_bottom = 0.032
-	fullscreen_button.offset_left = -13.5
-	fullscreen_button.offset_right = 13.5
-	fullscreen_button.offset_top = -13.5
-	fullscreen_button.offset_bottom = 13.5
-	fullscreen_button.button_down.connect(_block_title_accept_for_fullscreen)
+	var fullscreen_button := _add_title_icon_button("FullscreenButton", "Fullscreen", _fullscreen_icon_texture(), 0)
 	fullscreen_button.pressed.connect(_toggle_fullscreen)
-	title_layer.add_child(fullscreen_button)
+	title_sound_button = _add_title_icon_button("SoundButton", "Sound", _sound_icon_texture(true), 1)
+	title_sound_button.pressed.connect(_toggle_sound)
 	_refresh_title_menu()
 
 
@@ -1436,6 +1431,36 @@ func _toggle_fullscreen() -> void:
 	_refresh_mouse_mode.call_deferred()
 
 
+# Icons sit in the top-right corner, their strokes lined up with the HUD digits:
+# top with the score, right edge with the life digit.
+func _add_title_icon_button(button_name: String, tooltip: String, icon: Texture2D, slot: int) -> Button:
+	var button := Button.new()
+	button.name = button_name
+	button.icon = icon
+	button.flat = true
+	button.focus_mode = Control.FOCUS_NONE
+	button.tooltip_text = tooltip
+	for style in ["normal", "hover", "pressed", "disabled", "focus", "hover_pressed"]:
+		button.add_theme_stylebox_override(style, StyleBoxEmpty.new())
+	var right := -TITLE_ICON_RIGHT_MARGIN + float(TITLE_ICON_INK_RIGHT) - float(slot) * TITLE_ICON_STRIDE
+	button.anchor_left = 1.0
+	button.anchor_right = 1.0
+	button.offset_left = right - float(TITLE_ICON_SIZE)
+	button.offset_right = right
+	button.offset_top = TITLE_ICON_TOP_MARGIN - float(TITLE_ICON_INK_TOP)
+	button.offset_bottom = button.offset_top + float(TITLE_ICON_SIZE)
+	button.button_down.connect(_block_title_accept_for_fullscreen)
+	title_layer.add_child(button)
+	return button
+
+
+func _toggle_sound() -> void:
+	var muted := not AudioServer.is_bus_mute(0)
+	AudioServer.set_bus_mute(0, muted)
+	if is_instance_valid(title_sound_button):
+		title_sound_button.icon = _sound_icon_texture(not muted)
+
+
 func _block_title_accept_for_fullscreen() -> void:
 	title_accept_blocked_by_fullscreen = true
 
@@ -1453,6 +1478,49 @@ func _fullscreen_icon_texture() -> Texture2D:
 	_draw_icon_line(image, Vector2i(25, 19), Vector2i(25, 25), color)
 	_draw_icon_line(image, Vector2i(19, 25), Vector2i(25, 25), color)
 	return ImageTexture.create_from_image(image)
+
+
+func _sound_icon_texture(on: bool) -> Texture2D:
+	var image := Image.create(TITLE_ICON_SIZE, TITLE_ICON_SIZE, false, Image.FORMAT_RGBA8)
+	image.fill(Color.TRANSPARENT)
+	var color := Color(1.0, 1.0, 1.0, 0.48)
+	# Speaker: a small box and a cone opening to the right, inside the same 7..25 frame as the fullscreen corners.
+	var speaker := PackedVector2Array([
+		Vector2(7, 12), Vector2(10, 12), Vector2(14, 8), Vector2(14, 24), Vector2(10, 20), Vector2(7, 20), Vector2(7, 12),
+	])
+	_draw_icon_polyline(image, speaker, color)
+	if on:
+		_draw_icon_arc(image, Vector2(14, 16), 5.5, color)
+		_draw_icon_arc(image, Vector2(14, 16), 11.0, color)
+	else:
+		_draw_icon_polyline(image, PackedVector2Array([Vector2(19, 13), Vector2(25, 19)]), color)
+		_draw_icon_polyline(image, PackedVector2Array([Vector2(25, 13), Vector2(19, 19)]), color)
+	return ImageTexture.create_from_image(image)
+
+
+func _draw_icon_arc(image: Image, center: Vector2, radius: float, color: Color) -> void:
+	var points := PackedVector2Array()
+	for step in range(9):
+		var angle := lerpf(-PI * 0.25, PI * 0.25, float(step) / 8.0)
+		points.append(center + Vector2(cos(angle), sin(angle)) * radius)
+	_draw_icon_polyline(image, points, color)
+
+
+# Anti-aliased 3px stroke; straight horizontal and vertical runs stay as crisp as _draw_icon_line.
+func _draw_icon_polyline(image: Image, points: PackedVector2Array, color: Color) -> void:
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var pixel := Vector2(x, y)
+			var nearest := INF
+			for index in range(points.size() - 1):
+				var closest := Geometry2D.get_closest_point_to_segment(pixel, points[index], points[index + 1])
+				nearest = minf(nearest, pixel.distance_to(closest))
+			var coverage := clampf(2.0 - nearest, 0.0, 1.0)
+			if coverage <= 0.0:
+				continue
+			var current := image.get_pixel(x, y)
+			if color.a * coverage > current.a:
+				image.set_pixel(x, y, Color(color, color.a * coverage))
 
 
 func _draw_icon_line(image: Image, from: Vector2i, to: Vector2i, color: Color) -> void:
@@ -2959,7 +3027,10 @@ func _debug_force_boss() -> void:
 func _end_boss_mode() -> void:
 	boss_gum_controller.reset()
 	_award_remaining_boss_turret_scores()
+	var lives_before := game_state.player_lives
 	game_state.grant_boss_extend()
+	if game_state.player_lives > lives_before:
+		hud.flash_life()
 	if game_state.game_mode == "arcade" and game_state.active_arcade_boss_rank == GameStateUtil.ARCADE_MAX_RANK:
 		game_state.complete_arcade()
 		bgm.stop()
