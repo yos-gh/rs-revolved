@@ -73,6 +73,39 @@ static func shape_overlaps_shape(a: Dictionary, b: Dictionary) -> bool:
 	return circle_overlaps_circle(a.pos, a.radius, b.pos, b.radius)
 
 
+# Radius around enemy.pos that contains every collision part at any rotation. Cached on the
+# enemy; parts are fixed after spawn.
+static func enemy_bound_radius(enemy: Dictionary) -> float:
+	var local_parts: Array = enemy.get("collision_parts", [])
+	if local_parts.is_empty():
+		return enemy.radius
+	var cached = enemy.get("bound_radius")
+	if cached != null:
+		return cached
+	var bound := 0.0
+	for local_part_variant in local_parts:
+		var local_part := local_part_variant as Dictionary
+		if local_part.type == "capsule":
+			bound = maxf(bound, maxf((local_part.a as Vector2).length(), (local_part.b as Vector2).length()) + float(local_part.radius))
+		else:
+			bound = maxf(bound, (local_part.get("pos", Vector2.ZERO) as Vector2).length() + float(local_part.radius))
+	enemy["bound_radius"] = bound
+	return bound
+
+
+# Center and radius of a circle that contains the shape, for cheap rejects before exact tests.
+static func shape_bound_center(shape: Dictionary) -> Vector2:
+	if shape.type == "capsule":
+		return ((shape.a as Vector2) + (shape.b as Vector2)) * 0.5
+	return shape.pos
+
+
+static func shape_bound_radius(shape: Dictionary) -> float:
+	if shape.type == "capsule":
+		return (shape.a as Vector2).distance_to(shape.b) * 0.5 + float(shape.radius)
+	return shape.radius
+
+
 static func shape_overlaps_enemy(shape: Dictionary, enemy: Dictionary) -> bool:
 	var local_parts: Array = enemy.get("collision_parts", [])
 	if local_parts.is_empty():

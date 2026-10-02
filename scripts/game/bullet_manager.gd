@@ -503,12 +503,23 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 
 
 func _resolve_player_shot_hits_on_destructible_bullets() -> void:
+	var targets: Array[Dictionary] = []
+	for target in bullets:
+		if target.hostile and target.get("shot_blockable", false):
+			targets.append(target)
+	if targets.is_empty():
+		return
 	for shot in bullets:
 		if shot.hostile or shot.life <= 0.0:
 			continue
 		var shot_shape := shape_for(shot)
-		for target in bullets:
-			if not target.hostile or target.life <= 0.0 or not target.get("shot_blockable", false):
+		var shot_center := CollisionUtil.shape_bound_center(shot_shape)
+		var shot_reach := CollisionUtil.shape_bound_radius(shot_shape)
+		for target in targets:
+			if target.life <= 0.0:
+				continue
+			var reach: float = shot_reach + target.radius
+			if shot_center.distance_squared_to(target.pos) > reach * reach:
 				continue
 			if CollisionUtil.shape_overlaps_circle(shot_shape, target.pos, target.radius):
 				shot.life = 0.0
@@ -603,7 +614,12 @@ func show_debug_shapes(debug_root: Node, hostile_color: Color, player_color: Col
 func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], damage: int) -> bool:
 	var hit := false
 	var bullet_shape := shape_for(bullet)
+	var bullet_center := CollisionUtil.shape_bound_center(bullet_shape)
+	var bullet_reach := CollisionUtil.shape_bound_radius(bullet_shape)
 	for enemy in enemies:
+		var reach := bullet_reach + CollisionUtil.enemy_bound_radius(enemy)
+		if bullet_center.distance_squared_to(enemy.pos) > reach * reach:
+			continue
 		if not CollisionUtil.shape_overlaps_enemy(bullet_shape, enemy):
 			continue
 		if enemy.get("blocks_shots", false):

@@ -246,6 +246,8 @@ const ZAKOM1_OUTLINE_WIDTH := ZAKO_BASE_OUTLINE_WIDTH
 const ZAKOM1_RIDGE_WIDTH := 0.014
 const ZAKOM1_VISUAL_ROLL_SPEED := 0.82
 const ZAKOM0_OUTWARD_TILT := deg_to_rad(13.0)
+const SELF_ROTATING_ENEMY_KINDS := ["zakoM0", "zakoM1", "zako0", "zako1", "zako2", "zako3", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p"]
+const MOVING_CHARACTER_KINDS := ["zako0", "zako1", "zako2", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p"]
 const BATCHED_ENEMY_KINDS := ["zako0", "zako1", "zako2", "zako3", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p", "zakoM0", "zakoM1"]
 const TITLE_MODES := [
 	"ARCADE MODE",
@@ -2287,9 +2289,10 @@ func _update_enemies(delta: float) -> void:
 
 		_update_spawn_collision_state(enemy)
 		enemy.node.position = _to_world(enemy.pos, _enemy_visual_height(enemy.kind))
-		if not enemy.get("entrance_managed", false):
+		if not enemy.get("entrance_managed", false) and not enemy.get("spawn_effect_done", false):
 			_apply_spawn_effect(enemy.node, enemy.age, 2.0, 0.35)
-		if not EnemyUtil.is_boss(enemy) and enemy.kind not in ["zakoM0", "zakoM1", "zako0", "zako1", "zako2", "zako3", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p"]:
+			enemy.spawn_effect_done = enemy.age >= SPAWN_EFFECT_TIME
+		if not EnemyUtil.is_boss(enemy) and enemy.kind not in SELF_ROTATING_ENEMY_KINDS:
 			enemy.node.rotation.y += delta * enemy.spin
 		if (
 			not enemy.get("spawn_collision_locked", false)
@@ -2775,7 +2778,7 @@ func _turn_toward_angle(current: float, target: float, max_delta: float) -> floa
 
 
 func _enemy_visual_height(kind: String) -> float:
-	if kind in ["zako0", "zako1", "zako2", "zako3p", "zako4", "zako5", "zako6", "zako7", "zako7p"]:
+	if kind in MOVING_CHARACTER_KINDS:
 		return MOVING_CHARACTER_VISUAL_HEIGHT
 	return DEFAULT_ENEMY_VISUAL_HEIGHT
 
@@ -3208,6 +3211,7 @@ func _ensure_enemy_visual_batch(kind: String) -> Dictionary:
 	var template := _enemy_visual_batch_template(kind)
 	var visual_parts: Array[Dictionary] = []
 	_collect_enemy_visual_batch_parts(template, Transform3D.IDENTITY, visual_parts, true)
+	visual_parts = _merge_enemy_visual_batch_parts(visual_parts)
 	var batch := {
 		"visual_entries": _create_enemy_visual_batch_entries(kind, "Visual", visual_parts, null),
 		"shadow_entries": [],
@@ -3217,6 +3221,60 @@ func _ensure_enemy_visual_batch(kind: String) -> Dictionary:
 	enemy_visual_batches[kind] = batch
 	template.free()
 	return batch
+
+
+# Parts never move inside a batched model, so parts whose materials look the same (models
+# build a fresh material per part) and share the afterimage setting are baked into one mesh.
+# Every merged entry then draws at the enemy transform itself, streamed once per kind.
+func _merge_enemy_visual_batch_parts(parts: Array[Dictionary]) -> Array[Dictionary]:
+	var groups := {}
+	var order: Array = []
+	for part in parts:
+		var material: Material = part.material
+		if material == null:
+			order.append(part)
+			continue
+		var key := "%s:%s" % [_batch_material_key(material), part.skip_shadow]
+		if not groups.has(key):
+			groups[key] = []
+			order.append(key)
+		groups[key].append(part)
+	var merged: Array[Dictionary] = []
+	for entry in order:
+		if entry is Dictionary:
+			merged.append(entry)
+			continue
+		var group: Array = groups[entry]
+		var tool := SurfaceTool.new()
+		for part in group:
+			var mesh: Mesh = part.mesh
+			for surface in range(mesh.get_surface_count()):
+				tool.append_from(mesh, surface, part.transform)
+		merged.append({
+			"mesh": tool.commit(),
+			"material": group[0].material,
+			"transform": Transform3D.IDENTITY,
+			"skip_shadow": group[0].skip_shadow,
+		})
+	return merged
+
+
+func _batch_material_key(material: Material) -> String:
+	var shader_mat := material as ShaderMaterial
+	if shader_mat != null:
+		var values := [shader_mat.shader.get_instance_id(), shader_mat.render_priority]
+		for param in shader_mat.shader.get_shader_uniform_list():
+			values.append(shader_mat.get_shader_parameter(param.name))
+		return var_to_str(values)
+	var std_mat := material as StandardMaterial3D
+	if std_mat != null and std_mat.next_pass == null:
+		return var_to_str([
+			"std", std_mat.albedo_color, std_mat.transparency, std_mat.blend_mode, std_mat.cull_mode,
+			std_mat.shading_mode, std_mat.emission_enabled, std_mat.emission, std_mat.emission_energy_multiplier,
+			std_mat.roughness, std_mat.metallic, std_mat.render_priority, std_mat.no_depth_test,
+			std_mat.vertex_color_use_as_albedo, std_mat.depth_draw_mode,
+		])
+	return str(material.get_instance_id())
 
 
 func _enemy_visual_batch_template(kind: String) -> Node3D:
@@ -3367,6 +3425,15 @@ func _update_enemy_visual_batches() -> void:
 
 
 func _update_enemy_visual_batch_entries(entries: Array, batch_enemies: Array, shadow: bool) -> void:
+	if not shadow and _entries_share_transform(entries):
+		var lead := entries[0].stream as MultiMeshStreamUtil
+		lead.begin()
+		for enemy in batch_enemies:
+			lead.add(_enemy_batch_visual_transform(enemy))
+		lead.commit()
+		for i in range(1, entries.size()):
+			(entries[i].stream as MultiMeshStreamUtil).mirror(lead)
+		return
 	for entry in entries:
 		(entry.stream as MultiMeshStreamUtil).begin()
 	for enemy in batch_enemies:
@@ -3375,6 +3442,15 @@ func _update_enemy_visual_batch_entries(entries: Array, batch_enemies: Array, sh
 			(entry.stream as MultiMeshStreamUtil).add(base_transform * (entry.local_transform as Transform3D))
 	for entry in entries:
 		(entry.stream as MultiMeshStreamUtil).commit()
+
+
+func _entries_share_transform(entries: Array) -> bool:
+	if entries.is_empty():
+		return false
+	for entry in entries:
+		if not (entry.local_transform as Transform3D).is_equal_approx(Transform3D.IDENTITY):
+			return false
+	return true
 
 
 func _enemy_batch_visual_transform(enemy: Dictionary) -> Transform3D:
@@ -5078,6 +5154,9 @@ func _is_player_hit_by_circle(pos: Vector2, radius: float) -> bool:
 
 func _is_player_hit_by_enemy(enemy: Dictionary) -> bool:
 	var axis := _player_hit_axis()
+	var reach := axis[0].distance_to(axis[1]) * 0.5 + PlayerUtil.HIT_RADIUS + CollisionUtil.enemy_bound_radius(enemy)
+	if ((axis[0] + axis[1]) * 0.5).distance_squared_to(enemy.pos) > reach * reach:
+		return false
 	return CollisionUtil.shape_overlaps_enemy({
 		"type": "capsule",
 		"a": axis[0],

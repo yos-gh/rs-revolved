@@ -54,6 +54,18 @@ func commit() -> void:
 		multimesh.buffer = buffer
 
 
+# Draws the same instances as another stream (one shared upload of transforms).
+func mirror(source) -> void:
+	if multimesh.instance_count != source.multimesh.instance_count:
+		multimesh.instance_count = source.multimesh.instance_count
+	count = source.count
+	buffer = source.buffer
+	multimesh.visible_instance_count = count
+	instance.visible = count > 0
+	if count > 0:
+		multimesh.buffer = buffer
+
+
 func clear() -> void:
 	begin()
 	commit()
