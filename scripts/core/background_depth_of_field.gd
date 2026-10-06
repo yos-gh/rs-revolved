@@ -20,11 +20,13 @@ var _source_camera: Camera3D
 # Fraction of the screen resolution the pass renders at. The blur radius is set in screen
 # pixels, so a softly blurred pass can render smaller without changing how wide it spreads.
 var resolution_scale := 1.0
+var _layer := BACKGROUND_LAYER
 
 
 func setup(source_camera: Camera3D, source_environment: Environment, height: float, near_radius: float, layer := BACKGROUND_LAYER) -> void:
 	name = "BackgroundDepthOfField" if layer == BACKGROUND_LAYER else "AfterimageDepthOfField"
 	_source_camera = source_camera
+	_layer = layer
 	_source_camera.cull_mask &= ~layer
 
 	viewport = SubViewport.new()
@@ -77,6 +79,17 @@ func update_focus(vanish_point: Vector2, ring_squash: float) -> void:
 
 func set_background_visible(value: bool) -> void:
 	quad.visible = value
+
+
+# Turns the separate blurred pass on or off. When off, `draw_direct` lets the main camera draw
+# the layer itself (sharp, no extra render); otherwise the layer is simply not drawn.
+func set_pass_enabled(enabled: bool, draw_direct := false) -> void:
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if enabled else SubViewport.UPDATE_DISABLED
+	quad.visible = enabled
+	if enabled or not draw_direct:
+		_source_camera.cull_mask &= ~_layer
+	else:
+		_source_camera.cull_mask |= _layer
 
 
 func _sync_camera() -> void:

@@ -399,6 +399,9 @@ var title_band: ColorRect
 var title_menu_buttons: Array[Button] = []
 var title_hi_score: BitmapNumber
 var title_sound_button: Button
+var title_quality_button: Button
+# Light mode drops the glow, the tunnel's blur pass and the afterimages for weak GPUs.
+var high_quality := true
 var title_mode_index := 0
 var title_void_revealed := false
 var title_void_noise_timer := 0.0
@@ -751,6 +754,8 @@ func _setup_floor() -> void:
 func _setup_background_tunnel() -> void:
 	tunnel_root = Node3D.new()
 	tunnel_root.name = "WireTunnelBackground"
+	# Sits with the rest of the background so light mode can draw it straight into the main view.
+	tunnel_root.position.y = -BACKGROUND_DEPTH_DROP
 	add_child(tunnel_root)
 
 	var color := Color(0.26, 0.58, 0.72)
@@ -1453,6 +1458,8 @@ func _setup_title() -> void:
 	fullscreen_button.pressed.connect(_toggle_fullscreen)
 	title_sound_button = _add_title_icon_button("SoundButton", "Sound", _sound_icon_texture(true), 1)
 	title_sound_button.pressed.connect(_toggle_sound)
+	title_quality_button = _add_title_icon_button("QualityButton", "Graphics", _quality_icon_texture(high_quality), 2)
+	title_quality_button.pressed.connect(_toggle_quality)
 	_refresh_title_menu()
 
 
@@ -1507,6 +1514,20 @@ func _toggle_sound() -> void:
 		title_sound_button.icon = _sound_icon_texture(not muted)
 
 
+func _toggle_quality() -> void:
+	high_quality = not high_quality
+	_apply_graphics_quality()
+	if is_instance_valid(title_quality_button):
+		title_quality_button.icon = _quality_icon_texture(high_quality)
+
+
+func _apply_graphics_quality() -> void:
+	world_environment.environment.glow_enabled = GLOBAL_GLOW_ENABLED and high_quality
+	background_dof.set_pass_enabled(high_quality, true)
+	if afterimage_dof != null:
+		afterimage_dof.set_pass_enabled(high_quality)
+
+
 func _block_title_accept_for_fullscreen() -> void:
 	title_accept_blocked_by_fullscreen = true
 
@@ -1541,6 +1562,23 @@ func _sound_icon_texture(on: bool) -> Texture2D:
 	else:
 		_draw_icon_polyline(image, PackedVector2Array([Vector2(19, 13), Vector2(25, 19)]), color)
 		_draw_icon_polyline(image, PackedVector2Array([Vector2(25, 13), Vector2(19, 19)]), color)
+	return ImageTexture.create_from_image(image)
+
+
+# Graphics: a diamond that gives off eight short rays of glow; light mode leaves the bare diamond.
+func _quality_icon_texture(high: bool) -> Texture2D:
+	var image := Image.create(TITLE_ICON_SIZE, TITLE_ICON_SIZE, false, Image.FORMAT_RGBA8)
+	image.fill(Color.TRANSPARENT)
+	var color := Color(1.0, 1.0, 1.0, 0.48)
+	var center := Vector2(16, 16)
+	_draw_icon_polyline(image, PackedVector2Array([
+		center + Vector2(0, -5.5), center + Vector2(5.5, 0), center + Vector2(0, 5.5), center + Vector2(-5.5, 0), center + Vector2(0, -5.5),
+	]), color)
+	if high:
+		for index in range(8):
+			var direction := Vector2.from_angle(float(index) * PI * 0.25)
+			var inner := 8.5 if index % 2 == 0 else 7.5
+			_draw_icon_polyline(image, PackedVector2Array([center + direction * inner, center + direction * 10.0]), color)
 	return ImageTexture.create_from_image(image)
 
 
