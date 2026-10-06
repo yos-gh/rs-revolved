@@ -23,7 +23,6 @@ driver/output_latency.web=100
 [debug]
 
 settings/stdout/print_fps=true
-settings/gdscript/always_track_call_stacks=true
 
 [display]
 
@@ -82,13 +81,6 @@ toggle_debug_collisions={
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-
-[sentry]
-
-schema_version=4
-options/dsn="https://eef95ee4ff4d2439011e7e4fc7ce2a59@o4511784787771392.ingest.us.sentry.io/4511784806121472"
-options/enable_metrics=false
-godot_logger/logs=15
 
 [shader_globals]
 
