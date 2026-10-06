@@ -62,6 +62,10 @@ const HOSTILE_DIRECTION_LINE_WIDTH := 0.012
 const BULLET0_SPIN_SPEED := 2.2
 const BULLET0_VISUAL_SCALE := 0.68
 const DEFAULT_HOSTILE_BULLET_LIFETIME := INF
+# Broad-phase grid for player shots against enemies (world units; about one large zako across).
+const ENEMY_GRID_CELL := 1.5
+const ENEMY_GRID_MIN_ENEMIES := 24
+const EMPTY_CELL := []
 const BULLET0_OUTER_COLOR := Color(0.77, 0.04, 0.28)
 const BULLET0_INNER_COLOR := Color(0.97, 0.12, 0.40)
 
@@ -470,6 +474,7 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 			spin_node.rotation.y += delta * BULLET0_SPIN_SPEED
 
 	_resolve_player_shot_hits_on_destructible_bullets()
+	var enemy_grid := _build_enemy_grid(enemies)
 	for bullet in bullets:
 		if bullet.hostile:
 			if player_can_be_hit and _may_reach_player(bullet, player_pos, player_reach) and _hits_player(bullet, player_axis):
@@ -477,7 +482,7 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 				player_hit = true
 		else:
 			bullet.erase("hit_effect_pos")
-			if _hit_enemies_by_bullet(bullet, enemies, 1):
+			if _hit_enemies_by_bullet(bullet, enemies, 1, enemy_grid):
 				bullet.life = 0.0
 				hit_effect_requested.emit(
 					bullet.get("hit_effect_pos", bullet.pos),
@@ -496,9 +501,8 @@ func update_bullets(delta: float, field_w: float, field_h: float, despawn_margin
 				node.queue_free()
 			if bullet.get("batched_visual", false):
 				_batch_dirty = true
+	# The batches are rebuilt once per frame in flush_visual_batches(), after enemies have fired.
 	bullets = live
-	if _batch_dirty:
-		_refresh_visual_batches()
 	return player_hit
 
 
@@ -611,28 +615,86 @@ func show_debug_shapes(debug_root: Node, hostile_color: Color, player_color: Col
 			debug_root.show_circle(bullet_shape.pos, bullet_shape.radius, color)
 
 
-func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], damage: int) -> bool:
+# Buckets enemy indices by the grid cells their bounding circles touch, so each player shot only
+# tests the enemies around it instead of the whole field. Small fields skip the grid.
+func _build_enemy_grid(enemies: Array[Dictionary]) -> Dictionary:
+	var grid := {}
+	if enemies.size() < ENEMY_GRID_MIN_ENEMIES:
+		return grid
+	for index in range(enemies.size()):
+		var enemy := enemies[index]
+		var pos: Vector2 = enemy.pos
+		var reach := CollisionUtil.enemy_bound_radius(enemy)
+		var x1 := floori((pos.x + reach) / ENEMY_GRID_CELL)
+		var y0 := floori((pos.y - reach) / ENEMY_GRID_CELL)
+		var y1 := floori((pos.y + reach) / ENEMY_GRID_CELL)
+		for cx in range(floori((pos.x - reach) / ENEMY_GRID_CELL), x1 + 1):
+			for cy in range(y0, y1 + 1):
+				var key := _enemy_grid_key(cx, cy)
+				var cell = grid.get(key)
+				if cell == null:
+					grid[key] = [index]
+				else:
+					(cell as Array).append(index)
+	return grid
+
+
+static func _enemy_grid_key(cx: int, cy: int) -> int:
+	return (cx + 32768) * 65536 + (cy + 32768)
+
+
+# Enemy indices whose cells overlap the circle, ascending so hits resolve in the same order as a full scan.
+func _enemy_grid_candidates(grid: Dictionary, center: Vector2, reach: float) -> Array:
+	var x0 := floori((center.x - reach) / ENEMY_GRID_CELL)
+	var x1 := floori((center.x + reach) / ENEMY_GRID_CELL)
+	var y0 := floori((center.y - reach) / ENEMY_GRID_CELL)
+	var y1 := floori((center.y + reach) / ENEMY_GRID_CELL)
+	if x0 == x1 and y0 == y1:
+		return grid.get(_enemy_grid_key(x0, y0), EMPTY_CELL)
+	var found := []
+	for cx in range(x0, x1 + 1):
+		for cy in range(y0, y1 + 1):
+			found.append_array(grid.get(_enemy_grid_key(cx, cy), EMPTY_CELL))
+	found.sort()
+	var unique := []
+	for index in found:
+		if unique.is_empty() or unique[unique.size() - 1] != index:
+			unique.append(index)
+	return unique
+
+
+func _hit_enemies_by_bullet(bullet: Dictionary, enemies: Array[Dictionary], damage: int, enemy_grid := {}) -> bool:
 	var hit := false
 	var bullet_shape := shape_for(bullet)
 	var bullet_center := CollisionUtil.shape_bound_center(bullet_shape)
 	var bullet_reach := CollisionUtil.shape_bound_radius(bullet_shape)
+	if not enemy_grid.is_empty():
+		for index in _enemy_grid_candidates(enemy_grid, bullet_center, bullet_reach):
+			if _hit_enemy_by_bullet(bullet, bullet_shape, bullet_center, bullet_reach, enemies[index], damage):
+				hit = true
+		return hit
 	for enemy in enemies:
-		var reach := bullet_reach + CollisionUtil.enemy_bound_radius(enemy)
-		if bullet_center.distance_squared_to(enemy.pos) > reach * reach:
-			continue
-		if not CollisionUtil.shape_overlaps_enemy(bullet_shape, enemy):
-			continue
-		if enemy.get("blocks_shots", false):
-			if not bullet.has("hit_effect_pos"):
-				bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
-			hit = true
-			continue
-		if enemy.get("damageable", true):
-			if not bullet.has("hit_effect_pos"):
-				bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
-			enemy.life -= damage
+		if _hit_enemy_by_bullet(bullet, bullet_shape, bullet_center, bullet_reach, enemy, damage):
 			hit = true
 	return hit
+
+
+func _hit_enemy_by_bullet(bullet: Dictionary, bullet_shape: Dictionary, bullet_center: Vector2, bullet_reach: float, enemy: Dictionary, damage: int) -> bool:
+	var reach := bullet_reach + CollisionUtil.enemy_bound_radius(enemy)
+	if bullet_center.distance_squared_to(enemy.pos) > reach * reach:
+		return false
+	if not CollisionUtil.shape_overlaps_enemy(bullet_shape, enemy):
+		return false
+	if enemy.get("blocks_shots", false):
+		if not bullet.has("hit_effect_pos"):
+			bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
+		return true
+	if enemy.get("damageable", true):
+		if not bullet.has("hit_effect_pos"):
+			bullet["hit_effect_pos"] = CollisionUtil.contact_point_on_enemy(bullet_shape, enemy, bullet.vel)
+		enemy.life -= damage
+		return true
+	return false
 
 
 # Cheap bounding-circle reject so the exact capsule test only runs for bullets near the player.

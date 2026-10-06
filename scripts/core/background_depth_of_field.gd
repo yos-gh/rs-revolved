@@ -17,6 +17,9 @@ var camera: Camera3D
 var quad: MeshInstance3D
 var material: ShaderMaterial
 var _source_camera: Camera3D
+# Fraction of the screen resolution the pass renders at. The blur radius is set in screen
+# pixels, so a softly blurred pass can render smaller without changing how wide it spreads.
+var resolution_scale := 1.0
 
 
 func setup(source_camera: Camera3D, source_environment: Environment, height: float, near_radius: float, layer := BACKGROUND_LAYER) -> void:
@@ -77,7 +80,7 @@ func set_background_visible(value: bool) -> void:
 
 
 func _sync_camera() -> void:
-	var render_size := Vector2i(get_viewport().get_texture().get_size())
+	var render_size := Vector2i((Vector2(get_viewport().get_texture().get_size()) * resolution_scale).round())
 	if viewport.size != render_size and render_size.x > 0 and render_size.y > 0:
 		viewport.size = render_size
 	material.set_shader_parameter("px_scale", float(render_size.y) / 720.0)

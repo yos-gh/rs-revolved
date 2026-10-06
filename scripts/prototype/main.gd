@@ -165,11 +165,14 @@ const AFTERIMAGE_SCALE := 0.4
 const AFTERIMAGE_PULL := 1.0 / 3.0
 const AFTERIMAGE_ALPHA := 0.5
 const AFTERIMAGE_CULL_MARGIN := 40.0
+const TUNNEL_WIRE_SHADER := preload("res://assets/shaders/tunnel_wire.gdshader")
 const AFTERIMAGE_MIX_SHADER := preload("res://assets/shaders/afterimage_mix.gdshader")
 const AFTERIMAGE_ADD_SHADER := preload("res://assets/shaders/afterimage_add.gdshader")
 # Tunnel blur is 0.7 (near) .. 2.4 px (far); afterimages blur on their own pass.
 const AFTERIMAGE_NEAR_BLUR_PX := 2.0
 const AFTERIMAGE_FAR_BLUR_PX := 3.6
+# Afterimages are blurred by 2+ px anyway, so their pass renders at half resolution.
+const AFTERIMAGE_RESOLUTION_SCALE := 0.5
 const SCANLINE_COUNT := 11
 const SPAWN_EFFECT_TIME := 0.50
 const PLAYER_EXTEND_VISUAL_HEIGHT := 1.05
@@ -359,13 +362,11 @@ var background_dof: BackgroundDofUtil
 var tunnel_ring_multimesh: MultiMesh
 var tunnel_radial_multimesh: MultiMesh
 var tunnel_stream_multimesh: MultiMesh
-var tunnel_ring_buffer := PackedFloat32Array()
-var tunnel_radial_buffer := PackedFloat32Array()
-var tunnel_points := PackedVector2Array()
-var tunnel_ring_depths := PackedFloat32Array()
+var tunnel_ring_shape := PackedVector4Array()
+var tunnel_ring_twist := PackedVector2Array()
 var tunnel_stream_material: Material
-var tunnel_ring_material: StandardMaterial3D
-var tunnel_radial_material: StandardMaterial3D
+var tunnel_ring_material: ShaderMaterial
+var tunnel_radial_material: ShaderMaterial
 var floor_plane: MeshInstance3D
 var floor_material: StandardMaterial3D
 var main_light: DirectionalLight3D
@@ -753,14 +754,12 @@ func _setup_background_tunnel() -> void:
 	add_child(tunnel_root)
 
 	var color := Color(0.26, 0.58, 0.72)
-	tunnel_ring_material = _material(color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_EMISSION_DARKEN), TUNNEL_GLOW_RING_ENERGY)
-	tunnel_radial_material = _material(color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
+	tunnel_ring_material = _tunnel_wire_material(false, color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_EMISSION_DARKEN), TUNNEL_GLOW_RING_ENERGY)
+	tunnel_radial_material = _tunnel_wire_material(true, color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
 	tunnel_ring_multimesh = _create_line_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, tunnel_ring_material)
 	tunnel_radial_multimesh = _create_line_multimesh((TUNNEL_RING_COUNT - 1) * TUNNEL_SEGMENTS, tunnel_radial_material)
-	tunnel_ring_buffer.resize(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS * 12)
-	tunnel_radial_buffer.resize((TUNNEL_RING_COUNT - 1) * TUNNEL_SEGMENTS * 12)
-	tunnel_points.resize(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS)
-	tunnel_ring_depths.resize(TUNNEL_RING_COUNT)
+	tunnel_ring_shape.resize(TUNNEL_RING_COUNT)
+	tunnel_ring_twist.resize(TUNNEL_RING_COUNT)
 	tunnel_stream_material = VisualMaterialsUtil.flat_face(Color(0.94, 0.98, 1.0), 0.09, 0.42)
 	var stream_count := TUNNEL_STREAM_LANES * TUNNEL_STREAM_PLATES_PER_LANE if TUNNEL_STREAM_ENABLED else 0
 	tunnel_stream_multimesh = _create_tunnel_stream_multimesh(stream_count, tunnel_stream_material)
@@ -775,16 +774,38 @@ func _setup_background_tunnel() -> void:
 		add_child(afterimage_dof)
 		afterimage_dof.setup(camera, world_environment.environment, TUNNEL_SHADOW_HEIGHT - BACKGROUND_DEPTH_DROP, TUNNEL_NEAR_RADIUS, BackgroundDofUtil.AFTERIMAGE_LAYER)
 		afterimage_dof.set_blur(AFTERIMAGE_NEAR_BLUR_PX, AFTERIMAGE_FAR_BLUR_PX)
+		afterimage_dof.resolution_scale = AFTERIMAGE_RESOLUTION_SCALE
 
 
+func _tunnel_wire_material(radial: bool, albedo: Color, emission: Color, energy: float) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = TUNNEL_WIRE_SHADER
+	mat.set_shader_parameter("radial", radial)
+	mat.set_shader_parameter("line_height", TUNNEL_VISUAL_HEIGHT)
+	_set_tunnel_wire_colors(mat, albedo, emission, energy)
+	return mat
+
+
+func _set_tunnel_wire_colors(mat: ShaderMaterial, albedo: Color, emission: Color, energy: float) -> void:
+	mat.set_shader_parameter("albedo", albedo)
+	mat.set_shader_parameter("emission", emission)
+	mat.set_shader_parameter("emission_energy", energy)
+
+
+# Each instance is one wire, identified by (ring, segment) in its custom data; the tunnel
+# shader places it from the per-ring shape, so the instance data never changes.
 func _create_line_multimesh(instance_count: int, material: Material) -> MultiMesh:
 	var box := BoxMesh.new()
 	box.size = Vector3.ONE
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.use_custom_data = true
 	multimesh.instance_count = instance_count
 	multimesh.mesh = box
 	multimesh.custom_aabb = AABB(Vector3(-40.0, -1.0, -40.0), Vector3(80.0, 2.0, 80.0))
+	for index in range(instance_count):
+		multimesh.set_instance_transform(index, Transform3D.IDENTITY)
+		multimesh.set_instance_custom_data(index, Color(float(index / TUNNEL_SEGMENTS), float(index % TUNNEL_SEGMENTS), 0.0, 0.0))
 	var instance := MultiMeshInstance3D.new()
 	instance.multimesh = multimesh
 	instance.material_override = material
@@ -827,34 +848,11 @@ func _update_background_tunnel(delta: float) -> void:
 	scanline_time += delta * (0.10 + tunnel_speed * 0.035)
 	_update_scanlines()
 	_update_tunnel_stream_plates()
-	_update_tunnel_points()
-	# Build both wire batches as raw MultiMesh buffers: one upload per batch instead of ~1900 per-instance calls.
-	var ring_buffer := tunnel_ring_buffer
-	var radial_buffer := tunnel_radial_buffer
-	var points := tunnel_points
-	var ring_index := 0
-	var radial_index := 0
-	for ring in range(TUNNEL_RING_COUNT):
-		var depth := tunnel_ring_depths[ring]
-		var ring_width := _tunnel_line_width(depth, false)
-		var has_next_ring := ring < TUNNEL_RING_COUNT - 1
-		var next_depth := tunnel_ring_depths[ring + 1] if has_next_ring else 0.0
-		var radial_width := _tunnel_line_width((depth + next_depth) * 0.5, true)
-		var row := ring * TUNNEL_SEGMENTS
-		for segment in range(TUNNEL_SEGMENTS):
-			var a := points[row + segment]
-			var b := points[row + (segment + 1) % TUNNEL_SEGMENTS]
-			_write_line_instance(ring_buffer, ring_index, a, b, ring_width)
-			ring_index += 1
-			if not has_next_ring:
-				continue
-			if segment % tunnel_density_stride != 0 or next_depth <= depth:
-				_write_hidden_instance(radial_buffer, radial_index)
-			else:
-				_write_line_instance(radial_buffer, radial_index, a, points[row + TUNNEL_SEGMENTS + segment], radial_width)
-			radial_index += 1
-	tunnel_ring_multimesh.buffer = ring_buffer
-	tunnel_radial_multimesh.buffer = radial_buffer
+	_update_tunnel_rings()
+	for mat in [tunnel_ring_material, tunnel_radial_material]:
+		mat.set_shader_parameter("ring_shape", tunnel_ring_shape)
+		mat.set_shader_parameter("ring_twist", tunnel_ring_twist)
+		mat.set_shader_parameter("density_stride", tunnel_density_stride)
 	afterimage_vanish = _tunnel_center_at(0.0)
 	background_dof.update_focus(afterimage_vanish, TUNNEL_BASE_SQUASH)
 	RenderingServer.global_shader_parameter_set("afterimage_vanish", afterimage_vanish)
@@ -862,55 +860,20 @@ func _update_background_tunnel(delta: float) -> void:
 		afterimage_dof.update_focus(afterimage_vanish, TUNNEL_BASE_SQUASH)
 
 
-func _update_tunnel_points() -> void:
-	# Per-ring terms (center, radius, squash, twist) are shared by every segment, so compute them once per ring.
+# Per-ring terms (center, radius, squash, twist) are shared by every segment; the tunnel shader
+# turns them into the individual wires.
+func _update_tunnel_rings() -> void:
 	var twist_rate := 0.30 + sin(tunnel_time * 0.19) * 0.18
 	var base_twist := tunnel_time * 0.72
-	var index := 0
 	for ring in range(TUNNEL_RING_COUNT):
 		var depth := _tunnel_depth(ring)
-		tunnel_ring_depths[ring] = depth
 		var normalized_depth := depth / float(TUNNEL_RING_COUNT - 1)
 		var radius := lerpf(TUNNEL_FAR_RADIUS, TUNNEL_NEAR_RADIUS, pow(normalized_depth, 2.80))
 		var center := _tunnel_center_at(normalized_depth)
 		var squash_radius := radius * (0.58 + sin(tunnel_time * 0.29 + depth * 0.14) * 0.12)
 		var angle_offset := depth * twist_rate + base_twist + sin(tunnel_time * 0.31 + depth * 0.23) * 0.55
-		for segment in range(TUNNEL_SEGMENTS):
-			var angle := float(segment) / float(TUNNEL_SEGMENTS) * TAU + angle_offset
-			tunnel_points[index] = center + Vector2(cos(angle) * radius, sin(angle) * squash_radius)
-			index += 1
-
-
-# Writes the same transform as _line_transform() straight into a TRANSFORM_3D MultiMesh buffer (row-major 3x4).
-func _write_line_instance(buffer: PackedFloat32Array, instance: int, a: Vector2, b: Vector2, width: float) -> void:
-	var dx := b.x - a.x
-	var dy := b.y - a.y
-	var length := sqrt(dx * dx + dy * dy)
-	var ux := 1.0
-	var uy := 0.0
-	if length > 0.0:
-		ux = dx / length
-		uy = dy / length
-	var z_scale := maxf(0.01, length)
-	var o := instance * 12
-	buffer[o] = width * uy
-	buffer[o + 1] = 0.0
-	buffer[o + 2] = ux * z_scale
-	buffer[o + 3] = (a.x + b.x) * 0.5
-	buffer[o + 4] = 0.0
-	buffer[o + 5] = width
-	buffer[o + 6] = 0.0
-	buffer[o + 7] = TUNNEL_VISUAL_HEIGHT
-	buffer[o + 8] = -width * ux
-	buffer[o + 9] = 0.0
-	buffer[o + 10] = uy * z_scale
-	buffer[o + 11] = (a.y + b.y) * 0.5
-
-
-func _write_hidden_instance(buffer: PackedFloat32Array, instance: int) -> void:
-	var o := instance * 12
-	for i in range(12):
-		buffer[o + i] = 0.0
+		tunnel_ring_shape[ring] = Vector4(center.x, center.y, radius, squash_radius)
+		tunnel_ring_twist[ring] = Vector2(angle_offset, depth)
 
 
 func _update_tunnel_stream_plates() -> void:
@@ -1032,13 +995,9 @@ func _update_background_profile() -> void:
 	RenderingServer.set_default_clear_color(bg_color)
 	background_light_base_energy = float(profile.get("light", _background_light_energy(bg_color)))
 	_update_background_light()
-	tunnel_ring_material.albedo_color = wire_color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN)
-	tunnel_ring_material.emission = wire_color.darkened(TUNNEL_GLOW_EMISSION_DARKEN)
-	tunnel_ring_material.emission_energy_multiplier = TUNNEL_GLOW_RING_ENERGY
+	_set_tunnel_wire_colors(tunnel_ring_material, wire_color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN), wire_color.darkened(TUNNEL_GLOW_EMISSION_DARKEN), TUNNEL_GLOW_RING_ENERGY)
 	var radial_color := wire_color.darkened(0.18)
-	tunnel_radial_material.albedo_color = wire_color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN)
-	tunnel_radial_material.emission = radial_color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN)
-	tunnel_radial_material.emission_energy_multiplier = TUNNEL_GLOW_RADIAL_ENERGY
+	_set_tunnel_wire_colors(tunnel_radial_material, wire_color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), radial_color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
 
 
 func _limit_tunnel_line_luminance(color: Color) -> Color:
@@ -1131,12 +1090,6 @@ func _yaw_from_direction(direction: Vector2) -> float:
 
 func _tunnel_depth(ring: int) -> float:
 	return fmod(float(ring) + tunnel_time * 2.45, float(TUNNEL_RING_COUNT))
-
-
-func _tunnel_line_width(depth: float, radial: bool) -> float:
-	var normalized_depth := clampf(depth / float(TUNNEL_RING_COUNT - 1), 0.0, 1.0)
-	var near_width := 0.010 if radial else 0.012
-	return lerpf(0.0015, near_width, pow(normalized_depth, 0.65))
 
 
 func _line_transform(a: Vector2, b: Vector2, width: float) -> Transform3D:
