@@ -112,7 +112,7 @@ const BOSS_T_SLOW_GUN_EDGE_WIDTH := 0.015
 const BOSS_T_RAPID_GUN_EDGE_WIDTH := 0.016
 const BOSS_T_DIRECTION_GUN_EDGE_WIDTH := 0.017
 const TUNNEL_RING_COUNT := 40
-const TUNNEL_SEGMENTS := 24
+const TUNNEL_SEGMENTS := 8
 const TUNNEL_FAR_RADIUS := 0.001
 const TUNNEL_NEAR_RADIUS := 24.0
 const TUNNEL_WIRE_MAX_LUMINANCE := 0.46
@@ -166,6 +166,7 @@ const AFTERIMAGE_PULL := 1.0 / 3.0
 const AFTERIMAGE_ALPHA := 0.5
 const AFTERIMAGE_CULL_MARGIN := 40.0
 const TUNNEL_WIRE_SHADER := preload("res://assets/shaders/tunnel_wire.gdshader")
+const TUNNEL_FACE_SHADER := preload("res://assets/shaders/tunnel_face.gdshader")
 const AFTERIMAGE_MIX_SHADER := preload("res://assets/shaders/afterimage_mix.gdshader")
 const AFTERIMAGE_ADD_SHADER := preload("res://assets/shaders/afterimage_add.gdshader")
 # Tunnel blur is 0.7 (near) .. 2.4 px (far); afterimages blur on their own pass.
@@ -371,13 +372,13 @@ var tunnel_ring_twist := PackedVector2Array()
 var tunnel_stream_material: Material
 var tunnel_ring_material: ShaderMaterial
 var tunnel_radial_material: ShaderMaterial
+var tunnel_face_material: ShaderMaterial
 var floor_plane: MeshInstance3D
 var floor_material: StandardMaterial3D
 var main_light: DirectionalLight3D
 var world_environment: WorldEnvironment
 var tunnel_time := 0.0
 var tunnel_speed := 1.0
-var tunnel_density_stride := 1
 var background_profile_key := ""
 var background_light_base_energy := 2.2
 var scanline_root: Node3D
@@ -765,8 +766,16 @@ func _setup_background_tunnel() -> void:
 	var color := Color(0.26, 0.58, 0.72)
 	tunnel_ring_material = _tunnel_wire_material(false, color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_EMISSION_DARKEN), TUNNEL_GLOW_RING_ENERGY)
 	tunnel_radial_material = _tunnel_wire_material(true, color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
-	tunnel_ring_multimesh = _create_line_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, tunnel_ring_material)
-	tunnel_radial_multimesh = _create_line_multimesh((TUNNEL_RING_COUNT - 1) * TUNNEL_SEGMENTS, tunnel_radial_material)
+	# Radial wires and wall panels join each ring to the next, including the last ring to ring 0.
+	var box := BoxMesh.new()
+	box.size = Vector3.ONE
+	tunnel_ring_multimesh = _create_tunnel_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, box, tunnel_ring_material)
+	tunnel_radial_multimesh = _create_tunnel_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, box, tunnel_radial_material)
+	tunnel_face_material = ShaderMaterial.new()
+	tunnel_face_material.shader = TUNNEL_FACE_SHADER
+	var panel := PlaneMesh.new()
+	panel.size = Vector2.ONE
+	_create_tunnel_multimesh(TUNNEL_RING_COUNT * TUNNEL_SEGMENTS, panel, tunnel_face_material)
 	tunnel_ring_shape.resize(TUNNEL_RING_COUNT)
 	tunnel_ring_twist.resize(TUNNEL_RING_COUNT)
 	tunnel_stream_material = VisualMaterialsUtil.flat_face(Color(0.94, 0.98, 1.0), 0.09, 0.42)
@@ -801,16 +810,14 @@ func _set_tunnel_wire_colors(mat: ShaderMaterial, albedo: Color, emission: Color
 	mat.set_shader_parameter("emission_energy", energy)
 
 
-# Each instance is one wire, identified by (ring, segment) in its custom data; the tunnel
-# shader places it from the per-ring shape, so the instance data never changes.
-func _create_line_multimesh(instance_count: int, material: Material) -> MultiMesh:
-	var box := BoxMesh.new()
-	box.size = Vector3.ONE
+# Each instance is one wire or wall panel, identified by (ring, segment) in its custom data; the
+# tunnel shaders place it from the per-ring shape, so the instance data never changes.
+func _create_tunnel_multimesh(instance_count: int, mesh: Mesh, material: Material) -> MultiMesh:
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.use_custom_data = true
 	multimesh.instance_count = instance_count
-	multimesh.mesh = box
+	multimesh.mesh = mesh
 	multimesh.custom_aabb = AABB(Vector3(-40.0, -1.0, -40.0), Vector3(80.0, 2.0, 80.0))
 	for index in range(instance_count):
 		multimesh.set_instance_transform(index, Transform3D.IDENTITY)
@@ -858,10 +865,9 @@ func _update_background_tunnel(delta: float) -> void:
 	_update_scanlines()
 	_update_tunnel_stream_plates()
 	_update_tunnel_rings()
-	for mat in [tunnel_ring_material, tunnel_radial_material]:
+	for mat in [tunnel_ring_material, tunnel_radial_material, tunnel_face_material]:
 		mat.set_shader_parameter("ring_shape", tunnel_ring_shape)
 		mat.set_shader_parameter("ring_twist", tunnel_ring_twist)
-		mat.set_shader_parameter("density_stride", tunnel_density_stride)
 	afterimage_vanish = _tunnel_center_at(0.0)
 	background_dof.update_focus(afterimage_vanish, TUNNEL_BASE_SQUASH)
 	RenderingServer.global_shader_parameter_set("afterimage_vanish", afterimage_vanish)
@@ -1000,12 +1006,12 @@ func _update_background_profile() -> void:
 	var wire_color := _limit_tunnel_line_luminance(profile.wire)
 	var bg_color: Color = profile.bg
 	tunnel_speed = profile.speed
-	tunnel_density_stride = profile.density_stride
 	RenderingServer.set_default_clear_color(bg_color)
 	background_light_base_energy = float(profile.get("light", _background_light_energy(bg_color)))
 	_update_background_light()
 	_set_tunnel_wire_colors(tunnel_ring_material, wire_color.darkened(TUNNEL_GLOW_ALBEDO_DARKEN), wire_color.darkened(TUNNEL_GLOW_EMISSION_DARKEN), TUNNEL_GLOW_RING_ENERGY)
 	var radial_color := wire_color.darkened(0.18)
+	tunnel_face_material.set_shader_parameter("face_color", wire_color)
 	_set_tunnel_wire_colors(tunnel_radial_material, wire_color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), radial_color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
 
 
@@ -1018,20 +1024,20 @@ func _limit_tunnel_line_luminance(color: Color) -> Color:
 
 func _background_profile() -> Dictionary:
 	if not game_state.game_started:
-		return {"wire": Color(0.26, 0.58, 0.72), "bg": palette.bg, "speed": 1.0, "density_stride": 2, "light": 2.2}
+		return {"wire": Color(0.26, 0.58, 0.72), "bg": palette.bg, "speed": 1.0, "light": 2.2}
 	if game_state.game_mode == "endless":
 		if game_state.endless_difficulty == 1:
-			return {"wire": Color(0.86, 0.90, 0.92), "bg": Color(0.055, 0.060, 0.065), "speed": 1.30, "density_stride": 1, "light": 1.55}
+			return {"wire": Color(0.86, 0.90, 0.92), "bg": Color(0.055, 0.060, 0.065), "speed": 1.30, "light": 1.55}
 		if game_state.endless_difficulty == 2:
-			return {"wire": Color(0.58, 0.64, 0.72), "bg": Color(0.025, 0.028, 0.040), "speed": 1.45, "density_stride": 1, "light": 1.15}
+			return {"wire": Color(0.58, 0.64, 0.72), "bg": Color(0.025, 0.028, 0.040), "speed": 1.45, "light": 1.15}
 		if game_state.endless_difficulty == 3:
-			return {"wire": Color(0.48, 0.36, 0.70), "bg": Color(0.004, 0.004, 0.008), "speed": 1.65, "density_stride": 1, "light": 0.58}
-		return {"wire": Color(1.00, 0.24, 0.38), "bg": Color(0.035, 0.005, 0.012), "speed": 1.85, "density_stride": 1, "light": 0.78}
+			return {"wire": Color(0.48, 0.36, 0.70), "bg": Color(0.004, 0.004, 0.008), "speed": 1.65, "light": 0.58}
+		return {"wire": Color(1.00, 0.24, 0.38), "bg": Color(0.035, 0.005, 0.012), "speed": 1.85, "light": 0.78}
 	if game_state.music_stage == 1:
-		return {"wire": Color(0.98, 0.46, 0.56), "bg": Color(0.078, 0.026, 0.044), "speed": 0.85, "density_stride": 2, "light": 2.2}
+		return {"wire": Color(0.98, 0.46, 0.56), "bg": Color(0.078, 0.026, 0.044), "speed": 0.85, "light": 2.2}
 	if game_state.music_stage == 2:
-		return {"wire": Color(0.12, 0.82, 0.74), "bg": Color(0.006, 0.040, 0.070), "speed": 1.08, "density_stride": 1, "light": 1.35}
-	return {"wire": Color(0.20, 0.48, 1.00), "bg": Color(0.003, 0.009, 0.040), "speed": 1.35, "density_stride": 1, "light": 0.62}
+		return {"wire": Color(0.12, 0.82, 0.74), "bg": Color(0.006, 0.040, 0.070), "speed": 1.08, "light": 1.35}
+	return {"wire": Color(0.20, 0.48, 1.00), "bg": Color(0.003, 0.009, 0.040), "speed": 1.35, "light": 0.62}
 
 
 func _tunnel_point(ring: int, segment: int) -> Vector2:

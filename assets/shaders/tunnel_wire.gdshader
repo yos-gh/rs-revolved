@@ -4,10 +4,11 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_sc
 // Wire tunnel lines placed on the GPU. Each MultiMesh instance is a unit box whose custom data
 // holds (ring, segment); the script only uploads the per-ring shape (40 rings) each frame, and
 // the vertex stage stretches the box between two tunnel points, matching the old per-instance
-// transforms. Shading matches the StandardMaterial3D the tunnel used before.
+// transforms. Shading matches the StandardMaterial3D the tunnel used before. Rings are octagons,
+// so the tube shows its corners.
 
 const int RING_COUNT = 40;
-const int SEGMENTS = 24;
+const int SEGMENTS = 8;
 const float TAU_F = 6.28318530718;
 
 uniform vec4 albedo : source_color = vec4(1.0);
@@ -16,7 +17,6 @@ uniform float emission_energy = 1.0;
 uniform float roughness = 0.42;
 // Radial lines join a ring to the next one; ring lines join neighbouring segments.
 uniform bool radial = false;
-uniform int density_stride = 1;
 uniform float line_height = 0.018;
 // Per ring: centre xy, radius, squashed radius.
 uniform vec4 ring_shape[RING_COUNT];
@@ -44,9 +44,12 @@ void vertex() {
 	float width;
 	bool hidden = false;
 	if (radial) {
-		float next_depth = ring_twist[ring + 1].y;
-		hidden = segment % density_stride != 0 || next_depth <= depth;
-		b = tunnel_point(ring + 1, segment);
+		// Rings scroll by index, so the last ring's neighbour is ring 0; the pair that straddles
+		// the far/near wrap is the only one skipped.
+		int next_ring = (ring + 1) % RING_COUNT;
+		float next_depth = ring_twist[next_ring].y;
+		hidden = next_depth <= depth;
+		b = tunnel_point(next_ring, segment);
 		width = line_width((depth + next_depth) * 0.5, true);
 	} else {
 		b = tunnel_point(ring, (segment + 1) % SEGMENTS);
