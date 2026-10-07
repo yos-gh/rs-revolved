@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="64" viewBox="0 0 640 64">
+<title>title V chevron mask</title>
+<!-- One chevron of the title's V, as a white mask on the title atlas grid. The logo shader
+     draws it three times, stacked as one solid letter and then split apart. -->
+<path d="M151 30 L176 48 L181 48 L204 30 L204 36 L182 54 L175 54 L151 36 Z" transform="translate(3 -8)" fill="#ffffff"/>
+</svg>

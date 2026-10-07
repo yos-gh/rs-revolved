@@ -268,6 +268,10 @@ const TITLE_STRIP_TIME := 0.18
 const TITLE_STRIP_STAGGER := 0.014
 const TITLE_STRIP_BACKDROP := Color(0.32, 0.32, 0.33)
 const STRIP_REVEAL_SHADER := preload("res://assets/shaders/strip_reveal.gdshader")
+const TITLE_LOGO_SHADER := preload("res://assets/shaders/title_logo.gdshader")
+const TITLE_CHEVRON_MASK := preload("res://assets/ui/original_svg/title_chevron.svg")
+# The logo's progress runs past the strips until its V has split (title_logo.gdshader split_*).
+const TITLE_LOGO_SETTLE_TIME := 1.0
 const RESULT_REVEAL_DELAY := 0.35
 const RESULT_REVEAL_TIME := 0.70
 const TITLE_LOGO_REVEAL_DELAY := 0.12
@@ -1410,7 +1414,8 @@ func _setup_title() -> void:
 	title.name = "TitleLogo"
 	title.texture = TITLE_ATLAS
 	var logo_reveal := ShaderMaterial.new()
-	logo_reveal.shader = STRIP_REVEAL_SHADER
+	logo_reveal.shader = TITLE_LOGO_SHADER
+	logo_reveal.set_shader_parameter("chevron_mask", TITLE_CHEVRON_MASK)
 	title.material = logo_reveal
 	title.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	title.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -1745,7 +1750,7 @@ func _play_logo_reveal(delay: float) -> void:
 	material.set_shader_parameter("exit_progress", -1.0)
 	material.set_shader_parameter("progress", -delay)
 	var tween := create_tween()
-	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -delay, RESULT_REVEAL_TIME, delay + RESULT_REVEAL_TIME)
+	tween.tween_method(func(value: float) -> void: material.set_shader_parameter("progress", value), -delay, TITLE_LOGO_SETTLE_TIME, delay + TITLE_LOGO_SETTLE_TIME)
 
 
 func _play_strip_exit(material: ShaderMaterial) -> Tween:
