@@ -4,13 +4,10 @@ shader_type canvas_item;
 // sharp horizontal slices tear it sideways. The V arrives as a single chevron, one letter
 // thick; once its strips land, the upper and lower chevrons slip out from behind it.
 #include "res://assets/shaders/strip_reveal.gdshaderinc"
+#include "res://assets/shaders/slice_glitch.gdshaderinc"
 
 // One white chevron on the atlas grid (the middle one); the V is three copies of it.
 uniform sampler2D chevron_mask : filter_linear, repeat_disable;
-// Slice tearing fades out over this window of progress (seconds).
-uniform float glitch_fade_start = 0.30;
-uniform float glitch_fade_end = 0.62;
-uniform float glitch_rate = 30.0;
 // The V splits over this window of progress (seconds), starting as soon as its own strips
 // (3 and 4 of 12) have landed: 3 * stagger + duration.
 uniform float split_start = 0.31;
@@ -30,28 +27,8 @@ const float STEM_X = 52.5;
 const float LETTER_TOP = 22.0;
 const float LETTER_H = 17.0;
 
-float hash11(float p) {
-	return fract(sin(p * 127.1) * 43758.5453);
-}
-
-float hash21(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
 void fragment() {
-	vec2 uv = UV;
-	// Slices: random bands of rows jump sideways in whole atlas pixels, re-rolled at a
-	// steady rate so the tearing reads digital rather than wobbly.
-	float glitch = progress > 0.0 ? 1.0 - smoothstep(glitch_fade_start, glitch_fade_end, progress) : 0.0;
-	if (glitch > 0.0 && exit_progress < 0.0) {
-		float st = floor(progress * glitch_rate) + 1.0;
-		float y = uv.y * ATLAS_PX.y;
-		float band_h = mix(1.0, 7.0, hash11(st * 0.37 + 1.0));
-		float band_id = floor((y + hash11(st) * 8.0) / band_h);
-		float slice_on = step(1.0 - 0.45 * glitch, hash21(vec2(band_id, st)));
-		float slice_px = floor((hash21(vec2(band_id, st + 7.0)) - 0.5) * 90.0 * glitch + 0.5);
-		uv.x += slice_on * slice_px / ATLAS_PX.x;
-	}
+	vec2 uv = slice_glitch(UV, ATLAS_PX, 7.0, 90.0);
 
 	float shift = strip_shift(uv.x);
 	if (shift >= 2.0) {

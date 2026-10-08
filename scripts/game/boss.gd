@@ -7,6 +7,8 @@ const CORE_RING_CW_SPEED := 0.75
 const CORE_RING_CCW_SPEED := -1.50
 const CORE_MARK_SPEED := 0.42
 const CORE_MARK_PRECESSION_SPEED := 0.31
+# The small gem inside the core turns against the outer one.
+const CORE_HEART_SPEED := 1.9
 const CORE_WIRE_ROTATION_SPEED := Vector3(0.46, 0.72, 0.31)
 const CORE_SHELL_BASE_COLOR := Color.WHITE
 const CORE_SHELL_BASE_ALPHA := 0.055
@@ -133,6 +135,9 @@ func _update_core(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_m
 		core_mark.rotate_object_local(Vector3.UP, delta * CORE_MARK_SPEED * 2.0)
 		# Precess the tilted spin axis about the view axis so it never settles on one heading.
 		core_mark.rotate(Vector3.UP, delta * CORE_MARK_PRECESSION_SPEED)
+	var core_heart := enemy.get("core_heart") as Node3D
+	if core_heart != null:
+		core_heart.rotate_object_local(Vector3.UP, -delta * CORE_HEART_SPEED)
 	var wire_sphere := enemy.get("wire_sphere") as Node3D
 	if wire_sphere != null:
 		wire_sphere.visible = true
@@ -249,13 +254,8 @@ func _update_core_orbit_gun_visuals(enemy: Dictionary) -> void:
 		return
 	for gun in gun_orbit.get_children():
 		var gun_3d := gun as Node3D
-		if gun_3d == null:
-			continue
-		var local_pos := _core_gun_local_position(enemy, gun_3d)
-		gun_3d.position = local_pos
-		var facing := Vector2(local_pos.x, local_pos.z)
-		if facing.length_squared() > 0.0001:
-			gun_3d.rotation.y = -facing.angle() + PI * 0.5
+		if gun_3d != null:
+			gun_3d.transform = core_gun_orbit_transform(gun_3d, enemy.core_gun_angle)
 
 
 func _core_gun_offsets(enemy: Dictionary) -> Array[Vector2]:
@@ -265,7 +265,7 @@ func _core_gun_offsets(enemy: Dictionary) -> Array[Vector2]:
 		for gun in gun_orbit.get_children():
 			var gun_3d := gun as Node3D
 			if gun_3d != null:
-				var local_pos := _core_gun_local_position(enemy, gun_3d)
+				var local_pos := core_gun_orbit_transform(gun_3d, enemy.core_gun_angle).origin
 				offsets.append(Vector2(local_pos.x, local_pos.z) * CORE_VISUAL_SCALE)
 	if offsets.is_empty():
 		for index in range(4):
@@ -273,13 +273,19 @@ func _core_gun_offsets(enemy: Dictionary) -> Array[Vector2]:
 	return offsets
 
 
-func _core_gun_local_position(enemy: Dictionary, gun: Node3D) -> Vector3:
+# Where an orbit gun sits and how it faces: it runs around a tilted plane that itself
+# precesses about the view axis, its +X facing away from the core and +Y along the plane's normal.
+static func core_gun_orbit_transform(gun: Node3D, gun_angle: float) -> Transform3D:
 	var phase: float = gun.get_meta("orbit_angle", 0.0)
-	var tilt_x: float = gun.get_meta("orbit_tilt_x", 0.0)
-	var tilt_z: float = gun.get_meta("orbit_tilt_z", 0.0)
-	var orbit_angle: float = enemy.core_gun_angle + phase
-	var flat := Vector3(cos(orbit_angle) * CORE_GUN_LOCAL_RADIUS, 0.0, sin(orbit_angle) * CORE_GUN_LOCAL_RADIUS)
-	return Basis.from_euler(Vector3(tilt_x, 0.0, tilt_z)) * flat
+	var tilt: float = gun.get_meta("orbit_tilt", 0.0)
+	var node_angle: float = gun.get_meta("orbit_node", 0.0)
+	var speed_scale: float = gun.get_meta("orbit_speed_scale", 1.0)
+	var precession: float = gun.get_meta("orbit_precession", 0.0)
+	var plane := Basis(Vector3.UP, node_angle + gun_angle * precession) * Basis(Vector3.RIGHT, tilt)
+	var orbit_angle := gun_angle * speed_scale + phase
+	var outward := plane * Vector3(cos(orbit_angle), 0.0, sin(orbit_angle))
+	var normal := plane.y
+	return Transform3D(Basis(outward, normal, outward.cross(normal)), outward * CORE_GUN_LOCAL_RADIUS)
 
 
 func _update_turret(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_manager: BulletManager) -> void:

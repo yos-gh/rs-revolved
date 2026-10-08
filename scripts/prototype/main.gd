@@ -65,7 +65,6 @@ void fragment() {
 	ALPHA = beam_alpha;
 }
 """
-const BOSS_CORE_GUN_ORBIT_RADIUS := 0.96
 const BOSS_CAGED_CORE_OUTLINE_WIDTH := 0.040
 # Orrery-style hoops: thin cylindrical ribbons whose heights differ on purpose.
 const BOSS_RIBBON_INNER_WIDTH := 0.05
@@ -73,10 +72,17 @@ const BOSS_RIBBON_PRIMARY_WIDTH := 0.12
 const BOSS_RIBBON_SECONDARY_WIDTH := 0.24
 const BOSS_RIBBON_SEGMENTS := 96
 const BOSS_RIBBON_FACE_ALPHA_SCALE := 0.45
+# Each ring its own weight: the thin inner band barely there, the outer Saturn ring the most solid.
+const BOSS_RING_INNER_ALPHA := 0.13
+const BOSS_RING_PRIMARY_ALPHA := 0.30
+const BOSS_RING_OUTER_ALPHA := 0.50
 const BOSS_RIBBON_EDGE_WIDTH := 0.010
 const BOSS_CONNECTION_PULSES := 3
 const BOSS_CORE_GEM_STRETCH := 1.45
 const BOSS_CORE_GEM_TILT := 0.55
+# Same on-screen weight as the other models' outlines (ZAKO_BASE_OUTLINE_WIDTH at ~1x scale).
+const BOSS_CORE_GEM_EDGE_WIDTH := 0.010
+const BOSS_CORE_GEM_HEART_RATIO := 0.42
 const BOSS_ENTRANCE_CORE_TIME := 0.40
 const BOSS_ENTRANCE_RING_DELAY := 0.12
 const BOSS_ENTRANCE_RING_STAGGER := 0.12
@@ -3545,6 +3551,7 @@ func _spawn_boss_core() -> void:
 	enemy.wire_sphere = node.find_child("boss-core-wire-sphere", true, false)
 	enemy.energy_shell = node.find_child("boss-core-energy-shell", true, false)
 	enemy.core_mark = node.find_child("boss-core-inner-mark", true, false)
+	enemy.core_heart = node.find_child("boss-core-inner-mark-heart", true, false)
 	enemy.rings_cw = node.find_children("boss-core-ring-cw*", "Node3D", true, false)
 	enemy.rings_ccw = node.find_children("boss-core-ring-ccw*", "Node3D", true, false)
 	enemy.gun_orbit = node.find_child("boss-core-gun-orbit", true, false)
@@ -3561,9 +3568,9 @@ func _boss_core_caged_model(color: Color) -> Node3D:
 	core_visual.add_child(_boss_core_energy_shell())
 	core_visual.add_child(_boss_core_wire_sphere(color))
 	core_visual.add_child(_boss_core_caged_inner_mark(color))
-	model.add_child(_boss_core_arc_ring(1.18, BOSS_RIBBON_INNER_WIDTH, 3, 3, 0.22, 0.0, "boss-core-ring-cw-inner", color.darkened(0.12), Vector3(0.18, 1.0, 0.36), 0.55, Vector3.FORWARD, 0.10))
-	model.add_child(_boss_core_arc_ring(2.22, BOSS_RIBBON_PRIMARY_WIDTH, 4, 5, -0.30, 0.24, "boss-core-ring-ccw-primary", color.lerp(Color.WHITE, 0.58), Vector3(-0.45, 1.0, 0.20), -1.35, Vector3.RIGHT, -0.24, 0.23, 1.00))
-	model.add_child(_boss_core_arc_ring(3.18, BOSS_RIBBON_SECONDARY_WIDTH, 5, 6, 0.24, -0.34, "boss-core-ring-cw-outer", color.lerp(Color.WHITE, 0.72), Vector3(0.38, 1.0, -0.52), 0.95, Vector3.FORWARD, 0.34, 0.20, 0.92, true))
+	model.add_child(_boss_core_arc_ring(1.18, BOSS_RIBBON_INNER_WIDTH, 3, 3, 0.22, 0.0, "boss-core-ring-cw-inner", color.darkened(0.12), Vector3(0.18, 1.0, 0.36), 0.55, Vector3.FORWARD, 0.10, BOSS_RING_INNER_ALPHA, 0.85))
+	model.add_child(_boss_core_arc_ring(2.22, BOSS_RIBBON_PRIMARY_WIDTH, 4, 5, -0.30, 0.24, "boss-core-ring-ccw-primary", color.lerp(Color.WHITE, 0.58), Vector3(-0.45, 1.0, 0.20), -1.35, Vector3.RIGHT, -0.24, BOSS_RING_PRIMARY_ALPHA, 1.00))
+	model.add_child(_boss_core_arc_ring(3.18, BOSS_RIBBON_SECONDARY_WIDTH, 5, 6, 0.24, -0.34, "boss-core-ring-cw-outer", color.lerp(Color.WHITE, 0.72), Vector3(0.38, 1.0, -0.52), 0.95, Vector3.FORWARD, 0.34, BOSS_RING_OUTER_ALPHA, 1.05, true))
 	model.add_child(_boss_core_gun_orbit(color))
 	return model
 
@@ -3632,15 +3639,35 @@ func _boss_core_caged_inner_mark(color: Color) -> Node3D:
 		Vector3(0.0, 0.0, -extent), Vector3(0.0, -height, 0.0),
 		Vector3(0.0, 0.0, extent), Vector3(extent, 0.0, 0.0),
 	])
-	var indices := PackedInt32Array([0, 1, 2, 0, 2, 5, 0, 5, 4, 0, 4, 1, 3, 2, 1, 3, 5, 2, 3, 4, 5, 3, 1, 4])
-	var face := _array_mesh(points, indices, VisualMaterialsUtil.flat_face(color.lightened(0.08), 0.30, 0.62))
+	# Facets alternate light and dark around the gem (and across its girdle) so it reads cut.
+	var light_indices := PackedInt32Array([0, 1, 2, 0, 5, 4, 3, 5, 2, 3, 1, 4])
+	var dark_indices := PackedInt32Array([0, 2, 5, 0, 4, 1, 3, 2, 1, 3, 4, 5])
+	var face := _array_mesh(points, light_indices, VisualMaterialsUtil.flat_face(color.lightened(0.28), 0.44, 0.78))
 	face.name = "boss-core-inner-mark-face"
 	mark.add_child(face)
-	for edge in [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2], [3, 4], [3, 5], [1, 2], [2, 5], [5, 4], [4, 1]]:
-		var edge_mesh := _boss_core_edge(points[edge[0]], points[edge[1]], 0.018, color.lerp(Color.WHITE, 0.42), 0.42, 1.28)
-		edge_mesh.name = "boss-core-inner-mark-edge"
-		mark.add_child(edge_mesh, true)
+	var dark_face := _array_mesh(points, dark_indices, VisualMaterialsUtil.flat_face(color.darkened(0.30), 0.16, 0.30))
+	dark_face.name = "boss-core-inner-mark-face-dark"
+	mark.add_child(dark_face)
+	_add_boss_core_gem_edges(mark, points, BOSS_CORE_GEM_EDGE_WIDTH, color.lerp(Color.WHITE, 0.42), 0.26, 1.15, "boss-core-inner-mark-edge")
+	# A small heart inside, turning the other way: a hint of depth through the facets.
+	var heart := Node3D.new()
+	heart.name = "boss-core-inner-mark-heart"
+	heart.rotation.x = 0.62
+	mark.add_child(heart)
+	var heart_points := PackedVector3Array()
+	for point in points:
+		heart_points.append(point * BOSS_CORE_GEM_HEART_RATIO)
+	var heart_indices := PackedInt32Array([0, 1, 2, 0, 2, 5, 0, 5, 4, 0, 4, 1, 3, 2, 1, 3, 5, 2, 3, 4, 5, 3, 1, 4])
+	heart.add_child(_array_mesh(heart_points, heart_indices, VisualMaterialsUtil.flat_face(color.lerp(Color.WHITE, 0.55), 0.30, 1.40)))
+	_add_boss_core_gem_edges(heart, heart_points, BOSS_CORE_GEM_EDGE_WIDTH * 0.8, color.lerp(Color.WHITE, 0.70), 0.22, 1.30, "boss-core-inner-mark-heart-edge")
 	return mark
+
+
+func _add_boss_core_gem_edges(root: Node3D, points: PackedVector3Array, width: float, color: Color, alpha: float, emission: float, edge_name: String) -> void:
+	for edge in [[0, 1], [0, 2], [0, 4], [0, 5], [3, 1], [3, 2], [3, 4], [3, 5], [1, 2], [2, 5], [5, 4], [4, 1]]:
+		var edge_mesh := _boss_core_edge(points[edge[0]], points[edge[1]], width, color, alpha, emission)
+		edge_mesh.name = edge_name
+		root.add_child(edge_mesh, true)
 
 
 func _boss_core_arc_ring(radius: float, width: float, gap_start: int, gap_length: int, tilt_x: float, tilt_z: float, ring_name: String, color: Color, orbit_axis := Vector3.UP, orbit_speed := 0.0, precession_axis := Vector3.ZERO, precession_speed := 0.0, alpha := 0.26, emission := 1.05, flat := false) -> Node3D:
@@ -3726,24 +3753,55 @@ func _boss_core_arc_mesh(radius: float, width: float, from_angle: float, to_angl
 func _boss_core_gun_orbit(color: Color) -> Node3D:
 	var orbit := Node3D.new()
 	orbit.name = "boss-core-gun-orbit"
-	for index in range(4):
-		var angle := randf() * TAU
-		var tilt_x := randf_range(-0.55, 0.55)
-		var tilt_z := randf_range(-0.55, 0.55)
-		var gun := Node3D.new()
-		gun.set_meta("orbit_angle", angle)
-		gun.set_meta("orbit_tilt_x", tilt_x)
-		gun.set_meta("orbit_tilt_z", tilt_z)
-		gun.position = _boss_core_gun_orbit_position(angle, tilt_x, tilt_z)
-		gun.rotation.y = -Vector2(gun.position.x, gun.position.z).angle() + PI * 0.5
-		orbit.add_child(gun)
-		_add_zako4_box_part(gun, Vector3.ZERO, Vector3(0.16, 0.11, 0.22), color.darkened(0.12), 0.009, 0.22, 0.95)
+	# Two steeply tilted orbit planes, two guns facing each other on each. Like the rings, each
+	# plane precesses around the view axis (boss.gd), one plane running against the other.
+	var first_node := randf() * TAU
+	for plane in range(2):
+		var tilt := randf_range(0.70, 1.00) * (1.0 if plane == 0 else -1.0)
+		var node_angle := first_node + PI * 0.5 * float(plane) + randf_range(-0.3, 0.3)
+		var speed_scale := 1.0 if plane == 0 else -0.78
+		var precession := 0.08 if plane == 0 else -0.11
+		var phase := randf() * TAU
+		for side in range(2):
+			var gun := Node3D.new()
+			gun.set_meta("orbit_angle", phase + PI * float(side))
+			gun.set_meta("orbit_tilt", tilt)
+			gun.set_meta("orbit_node", node_angle)
+			gun.set_meta("orbit_speed_scale", speed_scale)
+			gun.set_meta("orbit_precession", precession)
+			orbit.add_child(gun)
+			_add_boss_core_gun_body(gun, color.darkened(0.12))
+			gun.transform = BossUtil.core_gun_orbit_transform(gun, 0.0)
 	return orbit
 
 
-func _boss_core_gun_orbit_position(angle: float, tilt_x: float, tilt_z: float) -> Vector3:
-	var flat := Vector3(cos(angle) * BOSS_CORE_GUN_ORBIT_RADIUS, 0.0, sin(angle) * BOSS_CORE_GUN_ORBIT_RADIUS)
-	return Basis.from_euler(Vector3(tilt_x, 0.0, tilt_z)) * flat
+# A small box satellite, its local +X facing away from the core. Opposite faces share a
+# shade and each pair differs, so the box reads solid as it turns.
+func _add_boss_core_gun_body(gun: Node3D, color: Color) -> void:
+	_add_boss_shaded_box(gun, Vector3.ZERO, Vector3(0.17, 0.15, 0.21), color, [0.42, 0.30, 0.16])
+
+
+func _add_boss_shaded_box(root: Node3D, center: Vector3, size: Vector3, color: Color, pair_alphas: Array) -> void:
+	var half := size * 0.5
+	var points := PackedVector3Array([
+		center + Vector3(-half.x, half.y, -half.z), center + Vector3(half.x, half.y, -half.z),
+		center + Vector3(half.x, half.y, half.z), center + Vector3(-half.x, half.y, half.z),
+		center + Vector3(-half.x, -half.y, -half.z), center + Vector3(half.x, -half.y, -half.z),
+		center + Vector3(half.x, -half.y, half.z), center + Vector3(-half.x, -half.y, half.z),
+	])
+	# Face pairs: +-X, +-Y, +-Z.
+	var pairs := [
+		PackedInt32Array([1, 5, 6, 1, 6, 2, 3, 7, 4, 3, 4, 0]),
+		PackedInt32Array([0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6]),
+		PackedInt32Array([0, 4, 5, 0, 5, 1, 2, 6, 7, 2, 7, 3]),
+	]
+	for pair in range(3):
+		root.add_child(_array_mesh(points, pairs[pair], VisualMaterialsUtil.flat_face(color, float(pair_alphas[pair]), 0.70)))
+	for edge in [
+		[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4],
+		[0, 4], [1, 5], [2, 6], [3, 7],
+	]:
+		root.add_child(_faint_glow_edge_width(points[edge[0]], points[edge[1]], color.lerp(Color.WHITE, 0.30), ZAKO_BASE_OUTLINE_WIDTH * 0.8, 0.30, 1.15))
 
 
 func _boss_core_ring_mesh(radius: float, width: float, color: Color, alpha: float, emission: float) -> MeshInstance3D:
