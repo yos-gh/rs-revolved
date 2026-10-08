@@ -132,6 +132,8 @@ const BACKGROUND_LIGHT_BREATH_DEPTH := 0.22
 const BACKGROUND_LIGHT_BREATH_SPEED := 0.18
 const GLOBAL_GLOW_ENABLED := true
 const GAMEPAD_AIM_DEADZONE := 0.24
+const GAMEPAD_TRIGGER_PRESS := 0.5
+const GAMEPAD_MOVE_BUTTONS := [JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT]
 
 enum InputMode {
 	KEYBOARD_MOUSE,
@@ -581,18 +583,21 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_debug_force_boss()
 
 
+# Movement (left stick, D-pad, WASD/arrows) is accepted in both modes, so a pad
+# without a right stick can be paired with the mouse. Only a mouse click or a
+# pad button / trigger press picks whether aiming and firing follow the mouse
+# or the right stick and pad buttons.
 func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index in GAMEPAD_MOVE_BUTTONS:
+			return
 		active_joypad_device = event.device
 		_apply_input_mode(InputMode.GAMEPAD)
-	elif event is InputEventJoypadMotion and absf(event.axis_value) >= GAMEPAD_AIM_DEADZONE:
+	elif event is InputEventJoypadMotion and event.axis in [JOY_AXIS_TRIGGER_LEFT, JOY_AXIS_TRIGGER_RIGHT] and event.axis_value >= GAMEPAD_TRIGGER_PRESS:
 		active_joypad_device = event.device
 		_apply_input_mode(InputMode.GAMEPAD)
 	elif event is InputEventMouseButton and event.pressed:
 		_apply_input_mode(InputMode.KEYBOARD_MOUSE)
-	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_LEFT, KEY_DOWN, KEY_RIGHT]:
-			_apply_input_mode(InputMode.KEYBOARD_MOUSE)
 
 
 func _setup_gamepad_input() -> void:

@@ -29,6 +29,32 @@ func _init() -> void:
 	assert(main.input_mode == MainUtil.InputMode.GAMEPAD)
 	assert(main.active_joypad_device == 2)
 
+	main.input_mode = MainUtil.InputMode.KEYBOARD_MOUSE
+	var dpad_event := InputEventJoypadButton.new()
+	dpad_event.button_index = JOY_BUTTON_DPAD_LEFT
+	dpad_event.pressed = true
+	main._input(dpad_event)
+	var stick_event := InputEventJoypadMotion.new()
+	stick_event.axis = JOY_AXIS_LEFT_X
+	stick_event.axis_value = 1.0
+	main._input(stick_event)
+	stick_event.axis = JOY_AXIS_RIGHT_X
+	main._input(stick_event)
+	assert(main.input_mode == MainUtil.InputMode.KEYBOARD_MOUSE)
+	var trigger_event := InputEventJoypadMotion.new()
+	trigger_event.device = 3
+	trigger_event.axis = JOY_AXIS_TRIGGER_LEFT
+	trigger_event.axis_value = 1.0
+	main._input(trigger_event)
+	assert(main.input_mode == MainUtil.InputMode.GAMEPAD)
+	assert(main.active_joypad_device == 3)
+
+	var key_event := InputEventKey.new()
+	key_event.keycode = KEY_W
+	key_event.pressed = true
+	main._input(key_event)
+	assert(main.input_mode == MainUtil.InputMode.GAMEPAD)
+
 	var mouse_event := InputEventMouseButton.new()
 	mouse_event.button_index = MOUSE_BUTTON_LEFT
 	mouse_event.pressed = true
