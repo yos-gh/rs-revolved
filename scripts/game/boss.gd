@@ -281,11 +281,12 @@ static func core_gun_orbit_transform(gun: Node3D, gun_angle: float) -> Transform
 	var node_angle: float = gun.get_meta("orbit_node", 0.0)
 	var speed_scale: float = gun.get_meta("orbit_speed_scale", 1.0)
 	var precession: float = gun.get_meta("orbit_precession", 0.0)
+	var radius: float = gun.get_meta("orbit_radius", CORE_GUN_LOCAL_RADIUS)
 	var plane := Basis(Vector3.UP, node_angle + gun_angle * precession) * Basis(Vector3.RIGHT, tilt)
 	var orbit_angle := gun_angle * speed_scale + phase
 	var outward := plane * Vector3(cos(orbit_angle), 0.0, sin(orbit_angle))
 	var normal := plane.y
-	return Transform3D(Basis(outward, normal, outward.cross(normal)), outward * CORE_GUN_LOCAL_RADIUS)
+	return Transform3D(Basis(outward, normal, outward.cross(normal)), outward * radius)
 
 
 func _update_turret(enemy: Dictionary, delta: float, player_pos: Vector2, bullet_manager: BulletManager) -> void:

@@ -73,6 +73,8 @@ const BOSS_RIBBON_SECONDARY_WIDTH := 0.24
 const BOSS_RIBBON_SEGMENTS := 96
 const BOSS_RIBBON_FACE_ALPHA_SCALE := 0.45
 # Each ring its own weight: the thin inner band barely there, the outer Saturn ring the most solid.
+# Orbit heights of the core's four guns (core model units), innermost fastest.
+const BOSS_CORE_GUN_ORBIT_RADII: Array[float] = [0.95, 1.01, 1.08, 1.15]
 const BOSS_RING_INNER_ALPHA := 0.13
 const BOSS_RING_PRIMARY_ALPHA := 0.30
 const BOSS_RING_OUTER_ALPHA := 0.50
@@ -3753,25 +3755,23 @@ func _boss_core_arc_mesh(radius: float, width: float, from_angle: float, to_angl
 func _boss_core_gun_orbit(color: Color) -> Node3D:
 	var orbit := Node3D.new()
 	orbit.name = "boss-core-gun-orbit"
-	# Two steeply tilted orbit planes, two guns facing each other on each. Like the rings, each
-	# plane precesses around the view axis (boss.gd), one plane running against the other.
+	# Each gun keeps its own orbit like a small moon: its own tilted plane precessing about the
+	# view axis (boss.gd), its own height, and a speed that falls off with height (Kepler-like),
+	# two running one way and two the other. Starting points are scattered, never evenly spaced.
 	var first_node := randf() * TAU
-	for plane in range(2):
-		var tilt := randf_range(0.70, 1.00) * (1.0 if plane == 0 else -1.0)
-		var node_angle := first_node + PI * 0.5 * float(plane) + randf_range(-0.3, 0.3)
-		var speed_scale := 1.0 if plane == 0 else -0.78
-		var precession := 0.08 if plane == 0 else -0.11
-		var phase := randf() * TAU
-		for side in range(2):
-			var gun := Node3D.new()
-			gun.set_meta("orbit_angle", phase + PI * float(side))
-			gun.set_meta("orbit_tilt", tilt)
-			gun.set_meta("orbit_node", node_angle)
-			gun.set_meta("orbit_speed_scale", speed_scale)
-			gun.set_meta("orbit_precession", precession)
-			orbit.add_child(gun)
-			_add_boss_core_gun_body(gun, color.darkened(0.12))
-			gun.transform = BossUtil.core_gun_orbit_transform(gun, 0.0)
+	for index in range(4):
+		var gun := Node3D.new()
+		var direction := 1.0 if index % 2 == 0 else -1.0
+		var radius := BOSS_CORE_GUN_ORBIT_RADII[index]
+		gun.set_meta("orbit_angle", randf() * TAU)
+		gun.set_meta("orbit_tilt", randf_range(0.55, 1.05) * direction)
+		gun.set_meta("orbit_node", first_node + TAU * float(index) / 4.0 + randf_range(-0.5, 0.5))
+		gun.set_meta("orbit_radius", radius)
+		gun.set_meta("orbit_speed_scale", direction * pow(BOSS_CORE_GUN_ORBIT_RADII[0] / radius, 1.5) * randf_range(0.92, 1.08))
+		gun.set_meta("orbit_precession", randf_range(0.05, 0.13) * (1.0 if randf() < 0.5 else -1.0))
+		orbit.add_child(gun)
+		_add_boss_core_gun_body(gun, color.darkened(0.12))
+		gun.transform = BossUtil.core_gun_orbit_transform(gun, 0.0)
 	return orbit
 
 
