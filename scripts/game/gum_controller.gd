@@ -21,6 +21,13 @@ const RADIUS_CHANGE_SPEED := 4.5
 const TRAIL_INTERVAL := 2.0 / 60.0
 const TRAIL_LIFETIME := 13.0 / 60.0
 const INPUT_BUFFER_TIME := 0.12
+# Out of energy the orb turns red but keeps its frame at full strength, and its core shrinks
+# to a small, hotter point, so it still reads on a red tunnel.
+const EMPTY_FRAME_COLOR := Color(1.00, 0.52, 0.46)
+const EMPTY_CORE_COLOR := Color(1.00, 0.86, 0.80)
+const EMPTY_CORE_SCALE := 0.55
+# A faint glow the size of the full core softens the small hot point; hidden while energy lasts.
+const EMPTY_CORE_GLOW_COLOR := Color(1.00, 0.60, 0.50)
 
 var state := 0
 var energy := 1.0
@@ -294,21 +301,25 @@ func _approach(current: float, target: float, step: float) -> float:
 
 func _add_layered_orb_visual(orb: Node3D) -> void:
 	var gum_color: Color = _palette.gum
-	var low_color: Color = _palette.gum_low if _palette.has("gum_low") else Color(0.35, 0.42, 0.58)
 	var empty_color: Color = _palette.gum_empty if _palette.has("gum_empty") else Color(1.0, 0.22, 0.16)
 
 	var outer := _sphere_mesh(0.29, "gum-layer-outer")
 	orb.add_child(outer)
-	_register_gum_visual(outer, gum_color.lightened(0.22), low_color, 0.28, 0.22, 1.20, 0.62)
+	_register_gum_visual(outer, gum_color.lightened(0.22), empty_color.darkened(0.10), 0.28, 0.22, 1.20, 0.62)
 
 	var inner := _sphere_mesh(0.21, "gum-layer-inner")
 	orb.add_child(inner)
-	_register_gum_visual(inner, gum_color, low_color.darkened(0.12), 0.40, 0.30, 1.48, 0.86)
+	_register_gum_visual(inner, gum_color, empty_color, 0.40, 0.30, 1.48, 0.86)
 
 	var core := _sphere_mesh(0.12, "gum-layer-core")
 	core.position = Vector3(0.040, 0.050, -0.025)
 	orb.add_child(core)
-	_register_gum_visual(core, Color(1.0, 0.86, 0.98), empty_color, 0.68, 0.48, 1.90, 1.20)
+	_register_gum_visual(core, Color(1.0, 0.86, 0.98), EMPTY_CORE_COLOR, 0.68, 0.78, 1.90, 2.10, EMPTY_CORE_SCALE)
+
+	var core_glow := _sphere_mesh(0.12, "gum-layer-core-glow")
+	core_glow.position = core.position
+	orb.add_child(core_glow)
+	_register_gum_visual(core_glow, EMPTY_CORE_GLOW_COLOR, EMPTY_CORE_GLOW_COLOR, 0.0, 0.26, 0.0, 1.30)
 
 	var rotating_frame := Node3D.new()
 	rotating_frame.name = "GumRotatingFrame"
@@ -324,22 +335,22 @@ func _add_layered_orb_visual(orb: Node3D) -> void:
 	for edge in [[0, 1], [1, 2], [2, 3], [3, 0]]:
 		var line := _gum_line_mesh(square_points[edge[0]], square_points[edge[1]], 0.018, "gum-inner-square-outline")
 		rotating_frame.add_child(line)
-		_register_gum_visual(line, gum_color.lightened(0.36), low_color.lightened(0.18), 0.72, 0.38, 1.35, 0.74)
+		_register_gum_visual(line, gum_color.lightened(0.36), EMPTY_FRAME_COLOR, 0.72, 0.72, 1.35, 0.74)
 
 	var primary_ring := _ring_mesh(0.34, 0.014, "gum-shell-ring-primary")
 	primary_ring.rotation = Vector3(deg_to_rad(70.0), 0.0, deg_to_rad(16.0))
 	rotating_frame.add_child(primary_ring)
-	_register_gum_visual(primary_ring, gum_color.lightened(0.10), low_color.lightened(0.20), 0.60, 0.30, 1.16, 0.68)
+	_register_gum_visual(primary_ring, gum_color.lightened(0.10), EMPTY_FRAME_COLOR, 0.60, 0.60, 1.16, 0.68)
 
 	var secondary_ring := _ring_mesh(0.26, 0.010, "gum-shell-ring-secondary")
 	secondary_ring.rotation = Vector3(deg_to_rad(22.0), 0.0, deg_to_rad(-38.0))
 	rotating_frame.add_child(secondary_ring)
-	_register_gum_visual(secondary_ring, gum_color.lightened(0.28), low_color.lightened(0.08), 0.34, 0.24, 0.85, 0.55)
+	_register_gum_visual(secondary_ring, gum_color.lightened(0.28), EMPTY_FRAME_COLOR, 0.34, 0.34, 0.85, 0.55)
 
 	var outer_outline := _ring_mesh(0.385, 0.012, "gum-outer-outline")
 	outer_outline.rotation = Vector3(deg_to_rad(90.0), 0.0, 0.0)
 	rotating_frame.add_child(outer_outline)
-	_register_gum_visual(outer_outline, gum_color.lightened(0.42), low_color.lightened(0.24), 0.78, 0.40, 1.28, 0.76)
+	_register_gum_visual(outer_outline, gum_color.lightened(0.42), EMPTY_FRAME_COLOR, 0.78, 0.78, 1.28, 0.76)
 
 
 func _sphere_mesh(radius: float, mesh_name: String) -> MeshInstance3D:
@@ -403,13 +414,14 @@ func _gum_line_mesh(a: Vector3, b: Vector3, width: float, mesh_name: String) -> 
 	return line
 
 
-func _register_gum_visual(visual: MeshInstance3D, color: Color, low_color: Color, alpha: float, low_alpha: float, emission: float, low_emission: float) -> void:
+func _register_gum_visual(visual: MeshInstance3D, color: Color, low_color: Color, alpha: float, low_alpha: float, emission: float, low_emission: float, low_scale := 1.0) -> void:
 	visual.set_meta("gum_color", color)
 	visual.set_meta("gum_low_color", low_color)
 	visual.set_meta("gum_alpha", alpha)
 	visual.set_meta("gum_low_alpha", low_alpha)
 	visual.set_meta("gum_emission", emission)
 	visual.set_meta("gum_low_emission", low_emission)
+	visual.set_meta("gum_low_scale", low_scale)
 	_visuals.append(visual)
 	_apply_gum_visual_material(visual, false)
 
@@ -419,6 +431,8 @@ func _apply_gum_visual_material(visual: MeshInstance3D, low_energy: bool) -> voi
 	var alpha: float = visual.get_meta("gum_low_alpha") if low_energy else visual.get_meta("gum_alpha")
 	var emission: float = visual.get_meta("gum_low_emission") if low_energy else visual.get_meta("gum_emission")
 	visual.material_override = _material(Color(color.r, color.g, color.b, alpha), color, emission)
+	visual.scale = Vector3.ONE * (float(visual.get_meta("gum_low_scale")) if low_energy else 1.0)
+	visual.visible = alpha > 0.0
 
 
 func _array_mesh(verts: PackedVector3Array, indices: PackedInt32Array, mat: Material) -> MeshInstance3D:
