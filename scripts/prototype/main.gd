@@ -3569,7 +3569,8 @@ func _boss_core_caged_model(color: Color) -> Node3D:
 	model.add_child(core_visual)
 	core_visual.add_child(_boss_core_energy_shell())
 	core_visual.add_child(_boss_core_wire_sphere(color))
-	core_visual.add_child(_boss_core_caged_inner_mark(color))
+	# The gem takes the yellow of the Armored Ray so it stands out from the cyan cage and tunnel once exposed.
+	core_visual.add_child(_boss_core_caged_inner_mark(palette.zako5))
 	model.add_child(_boss_core_arc_ring(1.18, BOSS_RIBBON_INNER_WIDTH, 3, 3, 0.22, 0.0, "boss-core-ring-cw-inner", color.darkened(0.12), Vector3(0.18, 1.0, 0.36), 0.55, Vector3.FORWARD, 0.10, BOSS_RING_INNER_ALPHA, 0.85))
 	model.add_child(_boss_core_arc_ring(2.22, BOSS_RIBBON_PRIMARY_WIDTH, 4, 5, -0.30, 0.24, "boss-core-ring-ccw-primary", color.lerp(Color.WHITE, 0.58), Vector3(-0.45, 1.0, 0.20), -1.35, Vector3.RIGHT, -0.24, BOSS_RING_PRIMARY_ALPHA, 1.00))
 	model.add_child(_boss_core_arc_ring(3.18, BOSS_RIBBON_SECONDARY_WIDTH, 5, 6, 0.24, -0.34, "boss-core-ring-cw-outer", color.lerp(Color.WHITE, 0.72), Vector3(0.38, 1.0, -0.52), 0.95, Vector3.FORWARD, 0.34, BOSS_RING_OUTER_ALPHA, 1.05, true))
