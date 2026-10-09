@@ -68,6 +68,10 @@ const ENEMY_GRID_MIN_ENEMIES := 24
 const EMPTY_CELL := []
 const BULLET0_OUTER_COLOR := Color(0.77, 0.04, 0.28)
 const BULLET0_INNER_COLOR := Color(0.97, 0.12, 0.40)
+const BULLET0_TAIL_DEFAULT_COLOR := Color(0.776, 0.706, 0.706, 0.60)
+# Tails never get stronger than the default: past this they stop reading as a faint trail.
+const BULLET0_TAIL_MAX_LUMINANCE := 0.72
+const BULLET0_TAIL_MAX_ALPHA := 0.60
 
 const DISPLAY_NAMES := {
 	"player_shot": "Wire Diamond",
@@ -84,8 +88,7 @@ const DISPLAY_NAMES := {
 var bullets: Array[Dictionary] = []
 
 var _palette := {}
-var _game_mode := "arcade"
-var _arcade_rank := 0
+var _bullet0_tail_color := BULLET0_TAIL_DEFAULT_COLOR
 var _batch_root: Node3D
 var _batch_instances := {}
 var _batch_dirty := false
@@ -118,8 +121,7 @@ func _setup_visual_batches() -> void:
 	])
 	_create_batch("bullet0_outer", _polygon_mesh(bullet0_outer), VisualMaterialsUtil.flat_face(BULLET0_OUTER_COLOR, 0.94, 0.14))
 	_create_batch("bullet0_inner", _polygon_mesh(bullet0_inner), VisualMaterialsUtil.flat_face(BULLET0_INNER_COLOR, 0.88, 0.58))
-	_create_batch("bullet0_tail_light", _box_mesh(Vector3(HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_LENGTH)), VisualMaterialsUtil.transparent_outline(Color(220.0 / 255.0, 200.0 / 255.0, 200.0 / 255.0).darkened(0.10), 0.60, 0.35))
-	_create_batch("bullet0_tail_dark", _box_mesh(Vector3(HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_LENGTH)), VisualMaterialsUtil.transparent_outline(Color(90.0 / 255.0, 90.0 / 255.0, 90.0 / 255.0).darkened(0.10), 0.60, 0.35))
+	_create_batch("bullet0_tail", _box_mesh(Vector3(HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_WIDTH * 2.0, HOSTILE_DIRECTION_LINE_LENGTH)), VisualMaterialsUtil.transparent_outline(_bullet0_tail_color, _bullet0_tail_color.a, 0.35))
 
 	var bullet1_outer := PackedVector3Array([
 		Vector3(-BULLET1_VISUAL_HALF_WIDTH, 0.0, -BULLET1_VISUAL_LENGTH * 0.5), Vector3(-BULLET1_VISUAL_HALF_WIDTH, 0.0, BULLET1_VISUAL_LENGTH * 0.5),
@@ -227,8 +229,7 @@ func _refresh_visual_batches() -> void:
 		(_batch_instances[key] as MultiMeshStreamUtil).begin()
 	var bullet0_outer := _batch_instances["bullet0_outer"] as MultiMeshStreamUtil
 	var bullet0_inner := _batch_instances["bullet0_inner"] as MultiMeshStreamUtil
-	var bullet0_tail_light := _batch_instances["bullet0_tail_light"] as MultiMeshStreamUtil
-	var bullet0_tail_dark := _batch_instances["bullet0_tail_dark"] as MultiMeshStreamUtil
+	var bullet0_tail := _batch_instances["bullet0_tail"] as MultiMeshStreamUtil
 	var bullet1_outer := _batch_instances["bullet1_outer"] as MultiMeshStreamUtil
 	var bullet1_inner := _batch_instances["bullet1_inner"] as MultiMeshStreamUtil
 	var bullet2_outer := _batch_instances["bullet2_outer"] as MultiMeshStreamUtil
@@ -256,7 +257,7 @@ func _refresh_visual_batches() -> void:
 			bullet0_outer.add(spin_transform)
 			bullet0_inner.add(spin_transform)
 			var tail_origin := root_origin + root_basis * Vector3(0.0, 0.040, -HOSTILE_DIRECTION_LINE_LENGTH * 0.5)
-			(bullet0_tail_light if bullet.tail_light else bullet0_tail_dark).add(Transform3D(root_basis, tail_origin))
+			bullet0_tail.add(Transform3D(root_basis, tail_origin))
 		elif display_key == "bullet1":
 			var transform := Transform3D(root_basis, root_origin)
 			bullet1_outer.add(transform)
@@ -278,9 +279,14 @@ func _refresh_visual_batches() -> void:
 	_batch_dirty = false
 
 
-func set_game_context(game_mode: String, arcade_rank: int) -> void:
-	_game_mode = game_mode
-	_arcade_rank = arcade_rank
+# Each tunnel profile picks the tail tint that keeps it off its own floor and wires, within the cap.
+func set_bullet0_tail_color(color: Color) -> void:
+	var luminance := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
+	var scale := minf(1.0, BULLET0_TAIL_MAX_LUMINANCE / maxf(luminance, 0.001))
+	color = Color(color.r * scale, color.g * scale, color.b * scale, minf(color.a, BULLET0_TAIL_MAX_ALPHA))
+	_bullet0_tail_color = color
+	var instance := (_batch_instances["bullet0_tail"] as MultiMeshStreamUtil).instance
+	(instance.material_override as ShaderMaterial).set_shader_parameter("line_color", color)
 
 
 func spawn_player_shot(pos: Vector2, angle: float) -> void:
@@ -387,7 +393,7 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 	else:
 		body.free()
 	if shape == "circle" and not batched_visual:
-		var line_color: Color = _bullet0_tail_color() if gum_blockable else _palette.boss_unblockable.lightened(0.25)
+		var line_color: Color = _bullet0_tail_color if gum_blockable else _palette.boss_unblockable.lightened(0.25)
 		node.add_child(_direction_line_mesh(HOSTILE_DIRECTION_LINE_LENGTH, HOSTILE_DIRECTION_LINE_WIDTH, line_color))
 	if node != null:
 		node.position = _to_world(pos, 0.25)
@@ -415,7 +421,6 @@ func spawn_hostile_bullet(pos: Vector2, angle: float, speed := BULLET0_SPEED, gu
 		"hostile": true,
 		"gum_blockable": gum_blockable,
 		"shot_blockable": is_boss_b2,
-		"tail_light": _uses_light_bullet0_tail(),
 		"spin_node": spin_node,
 		"growth_visual": growth_visual,
 		"break_color": _break_color_for_display_key(display_key),
@@ -965,20 +970,6 @@ func _endcap_mesh(pos: Vector2, radius: float, color: Color) -> MeshInstance3D:
 	cap.position = _to_world(pos, 0.0)
 	cap.material_override = _material(color, color, 1.2)
 	return cap
-
-
-func _bullet0_tail_color() -> Color:
-	if _uses_light_bullet0_tail():
-		return Color(220.0 / 255.0, 200.0 / 255.0, 200.0 / 255.0)
-	return Color(90.0 / 255.0, 90.0 / 255.0, 90.0 / 255.0)
-
-
-func _uses_light_bullet0_tail() -> bool:
-	if _game_mode == "arcade" and _arcade_rank < 11:
-		return true
-	if _game_mode == "endless" and _arcade_rank == 15:
-		return true
-	return false
 
 
 func _length_for_shape(shape: String, length_override: float) -> float:

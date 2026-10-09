@@ -512,7 +512,6 @@ func _process(delta: float) -> void:
 		_update_title()
 		_update_debug_collisions()
 		return
-	bullet_manager.set_game_context(game_state.game_mode, game_state.arcade_rank)
 	if game_state.game_over:
 		_update_game_over_scene(delta)
 		_update_game_over()
@@ -1026,6 +1025,7 @@ func _update_background_profile() -> void:
 	var radial_color := wire_color.darkened(0.18)
 	tunnel_face_material.set_shader_parameter("face_color", wire_color)
 	_set_tunnel_wire_colors(tunnel_radial_material, wire_color.darkened(TUNNEL_GLOW_RADIAL_ALBEDO_DARKEN), radial_color.darkened(TUNNEL_GLOW_RADIAL_EMISSION_DARKEN), TUNNEL_GLOW_RADIAL_ENERGY)
+	bullet_manager.set_bullet0_tail_color(profile.get("tail", BulletManagerUtil.BULLET0_TAIL_DEFAULT_COLOR))
 
 
 func _limit_tunnel_line_luminance(color: Color) -> Color:
@@ -1045,9 +1045,9 @@ func _background_profile() -> Dictionary:
 			return {"wire": Color(0.58, 0.64, 0.72), "bg": Color(0.025, 0.028, 0.040), "speed": 1.45, "light": 1.15}
 		if game_state.endless_difficulty == 3:
 			return {"wire": Color(0.48, 0.36, 0.70), "bg": Color(0.004, 0.004, 0.008), "speed": 1.65, "light": 0.58}
-		return {"wire": Color(1.00, 0.24, 0.38), "bg": Color(0.035, 0.005, 0.012), "speed": 1.85, "light": 0.78}
+		return {"wire": Color(1.00, 0.24, 0.38), "bg": Color(0.035, 0.005, 0.012), "speed": 1.85, "light": 0.78, "tail": Color(0.80, 0.82, 0.86, 0.60)}
 	if game_state.music_stage == 1:
-		return {"wire": Color(0.98, 0.46, 0.56), "bg": Color(0.078, 0.026, 0.044), "speed": 0.85, "light": 2.2}
+		return {"wire": Color(0.98, 0.46, 0.56), "bg": Color(0.078, 0.026, 0.044), "speed": 0.85, "light": 2.2, "tail": Color(0.92, 0.95, 0.98, 0.60)}
 	if game_state.music_stage == 2:
 		return {"wire": Color(0.12, 0.82, 0.74), "bg": Color(0.006, 0.040, 0.070), "speed": 1.08, "light": 1.35}
 	return {"wire": Color(0.20, 0.48, 1.00), "bg": Color(0.003, 0.009, 0.040), "speed": 1.35, "light": 0.62}
