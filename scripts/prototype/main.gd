@@ -327,7 +327,7 @@ var palette := {
 	"shot": Color(0.80, 0.95, 1.00),
 	"gum": Color(0.96, 0.42, 0.78),
 	"gum_low": Color(0.35, 0.42, 0.58),
-	"gum_empty": Color(1.00, 0.22, 0.16),
+	"gum_empty": Color(1.00, 0.30, 0.42),
 	"zako0": Color(0.96, 0.28, 0.35),
 	"zako1": Color(1.00, 0.62, 0.12),
 	"zako2": Color(0.35, 0.86, 0.42),
